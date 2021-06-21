@@ -23,5 +23,27 @@ import (
 )
 
 func TestAnalyzer(t *testing.T) {
-	analysistest.Run(t, analysistest.TestData(), Analyzer)
+	tests := []struct {
+		name              string
+		allowUnstructured string
+		testPackage       string
+	}{
+		{
+			name:              "Allow unstructured logs",
+			allowUnstructured: "true",
+			testPackage:       "allowUnstructuredLogs",
+		},
+		{
+			name:              "Do not allow unstructured logs",
+			allowUnstructured: "false",
+			testPackage:       "doNotAllowUnstructuredLogs",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			analyzer := analyser()
+			analyzer.Flags.Set("allow-unstructured", tt.allowUnstructured)
+			analysistest.Run(t, analysistest.TestData(), analyzer, tt.testPackage)
+		})
+	}
 }
