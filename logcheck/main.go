@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -27,21 +28,32 @@ import (
 	"golang.org/x/tools/go/analysis/singlechecker"
 )
 
-// Doc explaining the tool.
-const Doc = "Tool to check use of unstructured logging patterns."
-
-// Analyzer runs static analysis.
-var Analyzer = &analysis.Analyzer{
-	Name: "logcheck",
-	Doc:  Doc,
-	Run:  run,
+type config struct {
+	// When enabled, logcheck will ignore calls to unstructured klog methods (Info, Infof, Error, Errorf, Warningf, etc)
+	allowUnstructured bool
 }
 
 func main() {
-	singlechecker.Main(Analyzer)
+	singlechecker.Main(analyser())
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func analyser() *analysis.Analyzer {
+	c := config{}
+	logcheckFlags := flag.NewFlagSet("", flag.ExitOnError)
+	logcheckFlags.BoolVar(&c.allowUnstructured, "allow-unstructured", c.allowUnstructured, `when enabled, logcheck will ignore calls to unstructured
+klog methods (Info, Infof, Error, Errorf, Warningf, etc)`)
+
+	return &analysis.Analyzer{
+		Name: "logcheck",
+		Doc:  "Tool to check use of unstructured logging patterns.",
+		Run: func(pass *analysis.Pass) (interface{}, error) {
+			return run(pass, &c)
+		},
+		Flags: *logcheckFlags,
+	}
+}
+
+func run(pass *analysis.Pass, c *config) (interface{}, error) {
 
 	for _, file := range pass.Files {
 
@@ -50,7 +62,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			// We are intrested in function calls, as we want to detect klog.* calls
 			// passing all function calls to checkForFunctionExpr
 			if fexpr, ok := n.(*ast.CallExpr); ok {
-				checkForFunctionExpr(fexpr, pass)
+				checkForFunctionExpr(fexpr, pass, c)
 			}
 
 			return true
@@ -60,7 +72,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 }
 
 // checkForFunctionExpr checks for unstructured logging function, prints error if found any.
-func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass) {
+func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 
 	fun := fexpr.Fun
 	args := fexpr.Args
@@ -98,7 +110,7 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass) {
 				} else if fName == "ErrorS" {
 					isKeysValid(args[2:], fun, pass, fName)
 				}
-			} else {
+			} else if !c.allowUnstructured {
 				msg := fmt.Sprintf("unstructured logging function %q should not be used", fName)
 				pass.Report(analysis.Diagnostic{
 					Pos:     fun.Pos(),

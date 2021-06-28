@@ -14,35 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// test file for unstructured logging static check tool unit tests.
+// This fake package is created as golang.org/x/tools/go/analysis/analysistest
+// expects it to be here for loading. This package is used to test allow-unstructured
+// flag which suppresses errors when unstructured logging is used.
+// This is a test file for unstructured logging static check tool unit tests.
 
-package testdata
+package allowUnstructuredLogs
 
 import (
 	klog "k8s.io/klog/v2"
 )
 
-func printUnstructuredLog() {
-	klog.V(1).Infof("test log")      // want `unstructured logging function "Infof" should not be used`
-	klog.Infof("test log")           // want `unstructured logging function "Infof" should not be used`
-	klog.Info("test log")            // want `unstructured logging function "Info" should not be used`
-	klog.Infoln("test log")          // want `unstructured logging function "Infoln" should not be used`
-	klog.InfoDepth(1, "test log")    // want `unstructured logging function "InfoDepth" should not be used`
-	klog.Warning("test log")         // want `unstructured logging function "Warning" should not be used`
-	klog.Warningf("test log")        // want `unstructured logging function "Warningf" should not be used`
-	klog.WarningDepth(1, "test log") // want `unstructured logging function "WarningDepth" should not be used`
-	klog.Error("test log")           // want `unstructured logging function "Error" should not be used`
-	klog.Errorf("test log")          // want `unstructured logging function "Errorf" should not be used`
-	klog.Errorln("test log")         // want `unstructured logging function "Errorln" should not be used`
-	klog.ErrorDepth(1, "test log")   // want `unstructured logging function "ErrorDepth" should not be used`
-	klog.Fatal("test log")           // want `unstructured logging function "Fatal" should not be used`
-	klog.Fatalf("test log")          // want `unstructured logging function "Fatalf" should not be used`
-	klog.Fatalln("test log")         // want `unstructured logging function "Fatalln" should not be used`
-	klog.FatalDepth(1, "test log")   // want `unstructured logging function "FatalDepth" should not be used`
-
-}
-
-func printStructuredLog() {
+func allowUnstructuredLogs() {
+	// Structured logs
+	// Error is expected if structured logging pattern is not used correctly
 	klog.InfoS("test log")
 	klog.ErrorS(nil, "test log")
 	klog.InfoS("Starting container in a pod", "containerID", "containerID", "pod")                // want `Additional arguments to InfoS should always be Key Value pairs. Please check if there is any key or value missing.`
@@ -56,4 +41,23 @@ func printStructuredLog() {
 	klog.ErrorS(nil, "Starting container in a pod", testKey, "containerID") // want `Key positional arguments are expected to be inlined constant strings. `
 	klog.InfoS("test: %s", "testname")                                      // want `structured logging function "InfoS" should not use format specifier "%s"`
 	klog.ErrorS(nil, "test no.: %d", 1)                                     // want `structured logging function "ErrorS" should not use format specifier "%d"`
+
+	// Unstructured logs
+	// Error is not expected as this package allows unstructured logging
+	klog.V(1).Infof("test log")
+	klog.Infof("test log")
+	klog.Info("test log")
+	klog.Infoln("test log")
+	klog.InfoDepth(1, "test log")
+	klog.Warning("test log")
+	klog.Warningf("test log")
+	klog.WarningDepth(1, "test log")
+	klog.Error("test log")
+	klog.Errorf("test log")
+	klog.Errorln("test log")
+	klog.ErrorDepth(1, "test log")
+	klog.Fatal("test log")
+	klog.Fatalf("test log")
+	klog.Fatalln("test log")
+	klog.FatalDepth(1, "test log")
 }
