@@ -60,4 +60,8 @@ func allowUnstructuredLogs() {
 	klog.Fatalf("test log")
 	klog.Fatalln("test log")
 	klog.FatalDepth(1, "test log")
+	klog.Exit("test log")
+	klog.ExitDepth(1, "test log")
+	klog.Exitln("test log")
+	klog.Exitf("test log")
 }

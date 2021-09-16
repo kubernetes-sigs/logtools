@@ -60,5 +60,8 @@ func doNotAllowUnstructuredLogs() {
 	klog.Fatalf("test log")          // want `unstructured logging function "Fatalf" should not be used`
 	klog.Fatalln("test log")         // want `unstructured logging function "Fatalln" should not be used`
 	klog.FatalDepth(1, "test log")   // want `unstructured logging function "FatalDepth" should not be used`
-
+	klog.Exit("test log")            // want `unstructured logging function "Exit" should not be used`
+	klog.Exitf("test log")           // want `unstructured logging function "Exitf" should not be used`
+	klog.Exitln("test log")          // want `unstructured logging function "Exitln" should not be used`
+	klog.ExitDepth(1, "test log")    // want `unstructured logging function "ExitDepth" should not be used`
 }

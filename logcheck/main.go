@@ -129,6 +129,7 @@ func isUnstructured(fName string) bool {
 		"Warning", "Warningf", "Warningln", "WarningDepth",
 		"Error", "Errorf", "Errorln", "ErrorDepth",
 		"Fatal", "Fatalf", "Fatalln", "FatalDepth",
+		"Exit", "Exitf", "Exitln", "ExitDepth",
 	}
 
 	for _, name := range unstrucured {
