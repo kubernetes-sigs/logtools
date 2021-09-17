@@ -180,3 +180,20 @@ func Fatalln(args ...interface{}) {
 // Arguments are handled in the manner of fmt.Printf; a newline is appended if missing.
 func Fatalf(format string, args ...interface{}) {
 }
+
+func Exit(args ...interface{}) {
+}
+
+// ExitDepth acts as Exit but uses depth to determine which call frame to log.
+// ExitDepth(0, "msg") is the same as Exit("msg").
+func ExitDepth(depth int, args ...interface{}) {
+}
+
+// Exitln logs to the FATAL, ERROR, WARNING, and INFO logs, then calls os.Exit(1).
+func Exitln(args ...interface{}) {
+}
+
+// Exitf logs to the FATAL, ERROR, WARNING, and INFO logs, then calls os.Exit(1).
+// Arguments are handled in the manner of fmt.Printf; a newline is appended if missing.
+func Exitf(format string, args ...interface{}) {
+}
