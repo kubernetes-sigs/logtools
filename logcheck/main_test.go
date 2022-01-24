@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"golang.org/x/tools/go/analysis/analysistest"
+
+	"sigs.k8s.io/logtools/logcheck/pkg"
 )
 
 func TestAnalyzer(t *testing.T) {
@@ -46,7 +48,7 @@ func TestAnalyzer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			analyzer := analyser()
+			analyzer := pkg.Analyser()
 			analyzer.Flags.Set("allow-unstructured", tt.allowUnstructured)
 			analysistest.Run(t, analysistest.TestData(), analyzer, tt.testPackage)
 		})
