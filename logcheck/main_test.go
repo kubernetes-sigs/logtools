@@ -65,6 +65,10 @@ func TestAnalyzer(t *testing.T) {
 			name:        "verbose",
 			testPackage: "verbose",
 		},
+		{
+			name:        "gologr",
+			testPackage: "gologr",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

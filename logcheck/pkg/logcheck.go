@@ -87,7 +87,7 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 
 	return &analysis.Analyzer{
 		Name: "logcheck",
-		Doc:  "Tool to check use of unstructured logging patterns.",
+		Doc:  "Tool to check logging calls.",
 		Run: func(pass *analysis.Pass) (interface{}, error) {
 			return run(pass, &c)
 		},
@@ -155,6 +155,18 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 					checkForFormatSpecifier(fexpr, pass)
 				}
 			}
+		} else if isGoLogger(selExpr.X, pass) {
+			if c.isEnabled(parametersCheck, filename) {
+				checkForFormatSpecifier(fexpr, pass)
+				switch fName {
+				case "WithValues":
+					isKeysValid(args, fun, pass, fName)
+				case "Info":
+					isKeysValid(args[1:], fun, pass, fName)
+				case "Error":
+					isKeysValid(args[2:], fun, pass, fName)
+				}
+			}
 		}
 	}
 }
@@ -189,6 +201,23 @@ func isKlog(expr ast.Expr, pass *analysis.Pass) bool {
 		}
 	}
 
+	return false
+}
+
+// isGoLogger checks whether an expression is logr.Logger.
+func isGoLogger(expr ast.Expr, pass *analysis.Pass) bool {
+	if typeAndValue, ok := pass.TypesInfo.Types[expr]; ok {
+		switch t := typeAndValue.Type.(type) {
+		case *types.Named:
+			if typeName := t.Obj(); typeName != nil {
+				if pkg := typeName.Pkg(); pkg != nil {
+					if typeName.Name() == "Logger" && pkg.Path() == "github.com/go-logr/logr" {
+						return true
+					}
+				}
+			}
+		}
+	}
 	return false
 }
 
