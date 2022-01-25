@@ -32,6 +32,11 @@ func V(level Level) Verbose {
 	return Verbose{enabled: false}
 }
 
+// Enabled returns true if logging at the selected level is enabled.
+func (v Verbose) Enabled() bool {
+	return false
+}
+
 // Info is equivalent to the global Info function, guarded by the value of v.
 // See the documentation of V for usage.
 func (v Verbose) Info(args ...interface{}) {
