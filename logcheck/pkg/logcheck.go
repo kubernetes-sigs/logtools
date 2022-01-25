@@ -21,23 +21,68 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"os"
+	"path"
+	"strconv"
 	"strings"
 
 	"golang.org/x/exp/utf8string"
 	"golang.org/x/tools/go/analysis"
 )
 
+const (
+	structuredCheck = "structured"
+	parametersCheck = "parameters"
+)
+
+type checks map[string]*bool
+
 type config struct {
-	// When enabled, logcheck will ignore calls to unstructured klog methods (Info, Infof, Error, Errorf, Warningf, etc)
-	allowUnstructured bool
+	enabled       checks
+	fileOverrides RegexpFilter
+}
+
+func (c config) isEnabled(check string, filename string) bool {
+	return c.fileOverrides.Enabled(check, *c.enabled[check], filename)
 }
 
 // Analyser creates a new logcheck analyser.
 func Analyser() *analysis.Analyzer {
-	c := config{}
+	c := config{
+		enabled: checks{
+			structuredCheck: new(bool),
+			parametersCheck: new(bool),
+		},
+	}
+	c.fileOverrides.validChecks = map[string]bool{}
+	for key := range c.enabled {
+		c.fileOverrides.validChecks[key] = true
+	}
 	logcheckFlags := flag.NewFlagSet("", flag.ExitOnError)
-	logcheckFlags.BoolVar(&c.allowUnstructured, "allow-unstructured", c.allowUnstructured, `when enabled, logcheck will ignore calls to unstructured
-klog methods (Info, Infof, Error, Errorf, Warningf, etc)`)
+	prefix := "check-"
+	logcheckFlags.BoolVar(c.enabled[structuredCheck], prefix+structuredCheck, true, `When true, logcheck will warn about calls to unstructured
+klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
+	logcheckFlags.BoolVar(c.enabled[parametersCheck], prefix+parametersCheck, true, `When true, logcheck will check parameters of structured logging calls.`)
+	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
+
+	// Use env variables as defaults. This is necessary when used as plugin
+	// for golangci-lint because of
+	// https://github.com/golangci/golangci-lint/issues/1512.
+	for key, enabled := range c.enabled {
+		envVarName := "LOGCHECK_" + strings.ToUpper(strings.ReplaceAll(string(key), "-", "_"))
+		if value, ok := os.LookupEnv(envVarName); ok {
+			v, err := strconv.ParseBool(value)
+			if err != nil {
+				panic(fmt.Errorf("%s=%q: %v", envVarName, value, err))
+			}
+			*enabled = v
+		}
+	}
+	if value, ok := os.LookupEnv("LOGCHECK_CONFIG"); ok {
+		if err := c.fileOverrides.Set(value); err != nil {
+			panic(fmt.Errorf("LOGCHECK_CONFIG=%q: %v", value, err))
+		}
+	}
 
 	return &analysis.Analyzer{
 		Name: "logcheck",
@@ -50,11 +95,8 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc)`)
 }
 
 func run(pass *analysis.Pass, c *config) (interface{}, error) {
-
 	for _, file := range pass.Files {
-
 		ast.Inspect(file, func(n ast.Node) bool {
-
 			// We are intrested in function calls, as we want to detect klog.* calls
 			// passing all function calls to checkForFunctionExpr
 			if fexpr, ok := n.(*ast.CallExpr); ok {
@@ -69,7 +111,6 @@ func run(pass *analysis.Pass, c *config) (interface{}, error) {
 
 // checkForFunctionExpr checks for unstructured logging function, prints error if found any.
 func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
-
 	fun := fexpr.Fun
 	args := fexpr.Args
 
@@ -80,6 +121,8 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 	if selExpr, ok := fun.(*ast.SelectorExpr); ok {
 		// extracting function Name like Infof
 		fName := selExpr.Sel.Name
+
+		filename := pass.Pkg.Path() + "/" + path.Base(pass.Fset.Position(fexpr.Pos()).Filename)
 
 		// for nested function cases klog.V(1).Infof scenerios
 		// if selExpr.X contains one more caller expression which is selector expression
@@ -92,36 +135,40 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 
 		// extracting package name
 		pName, ok := selExpr.X.(*ast.Ident)
-
 		if ok && pName.Name == "klog" {
 			// Matching if any unstructured logging function is used.
 			if !isUnstructured((fName)) {
-				// if format specifier is used, check for arg length will most probably fail
-				// so check for format specifier first and skip if found
-				if checkForFormatSpecifier(fexpr, pass) {
-					return
+				if c.isEnabled(parametersCheck, filename) {
+					// if format specifier is used, check for arg length will most probably fail
+					// so check for format specifier first and skip if found
+					if checkForFormatSpecifier(fexpr, pass) {
+						return
+					}
+					if fName == "InfoS" {
+						isKeysValid(args[1:], fun, pass, fName)
+					} else if fName == "ErrorS" {
+						isKeysValid(args[2:], fun, pass, fName)
+					}
 				}
-				if fName == "InfoS" {
-					isKeysValid(args[1:], fun, pass, fName)
-				} else if fName == "ErrorS" {
-					isKeysValid(args[2:], fun, pass, fName)
-				}
-			} else if !c.allowUnstructured {
-				msg := fmt.Sprintf("unstructured logging function %q should not be used", fName)
-				pass.Report(analysis.Diagnostic{
-					Pos:     fun.Pos(),
-					Message: msg,
-				})
 			} else {
-				// Also check non-structured calls.
-				checkForFormatSpecifier(fexpr, pass)
+				if c.isEnabled(structuredCheck, filename) {
+					msg := fmt.Sprintf("unstructured logging function %q should not be used", fName)
+					pass.Report(analysis.Diagnostic{
+						Pos:     fun.Pos(),
+						Message: msg,
+					})
+				}
+
+				// Also check structured calls.
+				if c.isEnabled(parametersCheck, filename) {
+					checkForFormatSpecifier(fexpr, pass)
+				}
 			}
 		}
 	}
 }
 
 func isUnstructured(fName string) bool {
-
 	// List of klog functions we do not want to use after migration to structured logging.
 	unstrucured := []string{
 		"Infof", "Info", "Infoln", "InfoDepth",

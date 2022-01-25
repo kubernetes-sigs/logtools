@@ -26,31 +26,55 @@ import (
 
 func TestAnalyzer(t *testing.T) {
 	tests := []struct {
-		name              string
-		allowUnstructured string
-		testPackage       string
+		name        string
+		enabled     map[string]string
+		override    string
+		testPackage string
 	}{
 		{
-			name:              "Allow unstructured logs",
-			allowUnstructured: "true",
-			testPackage:       "allowUnstructuredLogs",
+			name: "Allow unstructured logs",
+			enabled: map[string]string{
+				"structured": "false",
+			},
+			testPackage: "allowUnstructuredLogs",
 		},
 		{
-			name:              "Do not allow unstructured logs",
-			allowUnstructured: "false",
-			testPackage:       "doNotAllowUnstructuredLogs",
+			name:        "Do not allow unstructured logs",
+			testPackage: "doNotAllowUnstructuredLogs",
 		},
 		{
-			name:              "Function call parameters",
-			allowUnstructured: "true",
-			testPackage:       "parameters",
+			name: "Per-file config",
+			enabled: map[string]string{
+				"structured": "false",
+			},
+			override:    "testdata/src/mixed/structured_logging",
+			testPackage: "mixed",
+		},
+		{
+			name: "Function call parameters",
+			enabled: map[string]string{
+				"structured": "false",
+			},
+			testPackage: "parameters",
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
 			analyzer := pkg.Analyser()
-			analyzer.Flags.Set("allow-unstructured", tt.allowUnstructured)
-			analysistest.Run(t, analysistest.TestData(), analyzer, tt.testPackage)
+			set := func(flag, value string) {
+				if value != "" {
+					if err := analyzer.Flags.Set(flag, value); err != nil {
+						t.Fatalf("unexpected error for %s: %v", flag, err)
+					}
+				}
+			}
+			for key, value := range tc.enabled {
+				set("check-"+key, value)
+			}
+			if tc.override != "" {
+				set("config", tc.override)
+			}
+			analysistest.Run(t, analysistest.TestData(), analyzer, tc.testPackage)
 		})
 	}
 }
