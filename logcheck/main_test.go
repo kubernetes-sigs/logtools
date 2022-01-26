@@ -69,6 +69,10 @@ func TestAnalyzer(t *testing.T) {
 			name:        "gologr",
 			testPackage: "gologr",
 		},
+		{
+			name:        "contextual",
+			testPackage: "contextual",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -98,10 +98,13 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 func run(pass *analysis.Pass, c *config) (interface{}, error) {
 	for _, file := range pass.Files {
 		ast.Inspect(file, func(n ast.Node) bool {
-			// We are intrested in function calls, as we want to detect klog.* calls
-			// passing all function calls to checkForFunctionExpr
-			if fexpr, ok := n.(*ast.CallExpr); ok {
-				checkForFunctionExpr(fexpr, pass, c)
+			switch n := n.(type) {
+			case *ast.CallExpr:
+				// We are intrested in function calls, as we want to detect klog.* calls
+				// passing all function calls to checkForFunctionExpr
+				checkForFunctionExpr(n, pass, c)
+			case *ast.FuncType:
+				checkForContextAndLogger(n, n.Params, pass, c)
 			}
 
 			return true
@@ -315,4 +318,37 @@ func hasFormatSpecifier(fArgs []ast.Expr) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// checkForContextAndLogger ensures that a function doesn't accept both a
+// context and a logger. That is problematic because it leads to ambiguity:
+// does the context already contain the logger? That matters when passing it on
+// without the logger.
+func checkForContextAndLogger(n ast.Node, params *ast.FieldList, pass *analysis.Pass, c *config) {
+	var haveLogger, haveContext bool
+
+	for _, param := range params.List {
+		if typeAndValue, ok := pass.TypesInfo.Types[param.Type]; ok {
+			switch t := typeAndValue.Type.(type) {
+			case *types.Named:
+				if typeName := t.Obj(); typeName != nil {
+					if pkg := typeName.Pkg(); pkg != nil {
+						if typeName.Name() == "Logger" && pkg.Path() == "github.com/go-logr/logr" {
+							haveLogger = true
+						} else if typeName.Name() == "Context" && pkg.Path() == "context" {
+							haveContext = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if haveLogger && haveContext {
+		pass.Report(analysis.Diagnostic{
+			Pos:     n.Pos(),
+			End:     n.End(),
+			Message: `A function should accept either a context or a logger, but not both. Having both makes calling the function harder because it must be defined whether the context must contain the logger and callers have to follow that.`,
+		})
+	}
 }
