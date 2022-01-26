@@ -105,6 +105,8 @@ func run(pass *analysis.Pass, c *config) (interface{}, error) {
 				checkForFunctionExpr(n, pass, c)
 			case *ast.FuncType:
 				checkForContextAndLogger(n, n.Params, pass, c)
+			case *ast.IfStmt:
+				checkForIfEnabled(n, pass, c)
 			}
 
 			return true
@@ -174,9 +176,9 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 	}
 }
 
-// isKlog checks whether an expression is klog.Verbose or the klog package itself.
-func isKlog(expr ast.Expr, pass *analysis.Pass) bool {
-	// For klog.V(1) and klogV := klog.V(1) we can decide based on the type.
+// isKlogVerbose returns true if the type of the expression is klog.Verbose (=
+// the result of klog.V).
+func isKlogVerbose(expr ast.Expr, pass *analysis.Pass) bool {
 	if typeAndValue, ok := pass.TypesInfo.Types[expr]; ok {
 		switch t := typeAndValue.Type.(type) {
 		case *types.Named:
@@ -188,6 +190,15 @@ func isKlog(expr ast.Expr, pass *analysis.Pass) bool {
 				}
 			}
 		}
+	}
+	return false
+}
+
+// isKlog checks whether an expression is klog.Verbose or the klog package itself.
+func isKlog(expr ast.Expr, pass *analysis.Pass) bool {
+	// For klog.V(1) and klogV := klog.V(1) we can decide based on the type.
+	if isKlogVerbose(expr, pass) {
+		return true
 	}
 
 	// In "klog.Info", "klog" is a package identifier. It doesn't need to
@@ -351,4 +362,69 @@ func checkForContextAndLogger(n ast.Node, params *ast.FieldList, pass *analysis.
 			Message: `A function should accept either a context or a logger, but not both. Having both makes calling the function harder because it must be defined whether the context must contain the logger and callers have to follow that.`,
 		})
 	}
+}
+
+// checkForIfEnabled detects `if klog.V(..).Enabled() { ...` and `if
+// logger.V(...).Enabled()` and suggests capturing the result of V.
+func checkForIfEnabled(i *ast.IfStmt, pass *analysis.Pass, c *config) {
+	// if i.Init == nil {
+	// A more complex if statement, let's assume it's okay.
+	// return
+	// }
+
+	// Must be a method call.
+	callExpr, ok := i.Cond.(*ast.CallExpr)
+	if !ok {
+		return
+	}
+	selExpr, ok := callExpr.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return
+	}
+
+	// We only care about calls to Enabled().
+	if selExpr.Sel.Name != "Enabled" {
+		return
+	}
+
+	// And it must be Enabled for klog or logr.Logger.
+	if !isKlogVerbose(selExpr.X, pass) &&
+		!isGoLogger(selExpr.X, pass) {
+		return
+	}
+
+	// logger.Enabled() is okay, logger.V(1).Enabled() is not.
+	// That means we need to check for another selector expression
+	// with V as method name.
+	subCallExpr, ok := selExpr.X.(*ast.CallExpr)
+	if !ok {
+		return
+	}
+	subSelExpr, ok := subCallExpr.Fun.(*ast.SelectorExpr)
+	if !ok || subSelExpr.Sel.Name != "V" {
+		return
+	}
+
+	// klogV is recommended as replacement for klog.V(). For logr.Logger
+	// let's use the root of the selector, which should be a variable.
+	varName := "klogV"
+	funcCall := "klog.V"
+	if isGoLogger(subSelExpr.X, pass) {
+		varName = "logger"
+		root := subSelExpr
+		for s, ok := root.X.(*ast.SelectorExpr); ok; s, ok = root.X.(*ast.SelectorExpr) {
+			root = s
+		}
+		if id, ok := root.X.(*ast.Ident); ok {
+			varName = id.Name
+		}
+		funcCall = varName + ".V"
+	}
+
+	pass.Report(analysis.Diagnostic{
+		Pos: i.Pos(),
+		End: i.End(),
+		Message: fmt.Sprintf("The result of %s should be stored in a variable and then be used multiple times: if %s := %s(); %s.Enabled() { ... %s.Info ... }",
+			funcCall, varName, funcCall, varName, varName),
+	})
 }

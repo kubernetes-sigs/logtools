@@ -22,12 +22,36 @@ limitations under the License.
 package verbose
 
 import (
+	"github.com/go-logr/logr"
 	klog "k8s.io/klog/v2"
 )
+
+var l, logger logr.Logger
 
 func verboseLogging() {
 	klog.V(1).Info("test log") // want `unstructured logging function "Info" should not be used`
 	if klogV := klog.V(1); klogV.Enabled() {
 		klogV.Infof("hello %s", "world") // want `unstructured logging function "Infof" should not be used`
+	}
+
+	// \(\) is actually () in the diagnostic output. We have to escape here
+	// because `want` expects a regular expression.
+
+	if klog.V(1).Enabled() { // want `The result of klog.V should be stored in a variable and then be used multiple times: if klogV := klog.V\(\); klogV.Enabled\(\) { ... klogV.Info ... }`
+		klog.V(1).InfoS("I'm logging at level 1.")
+	}
+
+	if l.V(1).Enabled() { // want `The result of l.V should be stored in a variable and then be used multiple times: if l := l.V\(\); l.Enabled\(\) { ... l.Info ... }`
+		l.V(1).Info("I'm logging at level 1.")
+	}
+
+	if l := l.V(2); l.Enabled() {
+		l.Info("I'm logging at level 2.")
+	}
+
+	if l := logger.V(2); l.Enabled() {
+		// This is probably an error (should be l instead of logger),
+		// but not currently detected.
+		logger.Info("I wanted to log at level 2, but really it is 0.")
 	}
 }
