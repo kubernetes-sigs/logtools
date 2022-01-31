@@ -47,6 +47,12 @@ the next section.
 
 Unstructured klog logging calls are flagged as error.
 
+## klog (disabled by default)
+
+None of the klog logging methods may be used. This is even stricter than
+`unstructured`. Instead, code should retrieve a logr.Logger from klog and log
+through that.
+
 ## parameters (enabled by default)
 
 This ensures that if certain logging functions are allowed and are used, those

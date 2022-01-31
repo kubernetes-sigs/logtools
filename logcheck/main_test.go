@@ -58,6 +58,23 @@ func TestAnalyzer(t *testing.T) {
 			testPackage: "parameters",
 		},
 		{
+			name: "Only allow contextual calls",
+			enabled: map[string]string{
+				"structured": "true",
+				"contextual": "true",
+			},
+			testPackage: "onlyAllowContextual",
+		},
+		{
+			name: "Only allow contextual calls through config",
+			enabled: map[string]string{
+				"structured": "false",
+				"contextual": "false",
+			},
+			override:    "testdata/src/onlyAllowContextual/klog_logging",
+			testPackage: "onlyAllowContextual",
+		},
+		{
 			name:        "importrename",
 			testPackage: "importrename",
 		},
@@ -66,11 +83,17 @@ func TestAnalyzer(t *testing.T) {
 			testPackage: "verbose",
 		},
 		{
-			name:        "gologr",
+			name: "gologr",
+			enabled: map[string]string{
+				"contextual": "true",
+			},
 			testPackage: "gologr",
 		},
 		{
-			name:        "contextual",
+			name: "contextual",
+			enabled: map[string]string{
+				"contextual": "true",
+			},
 			testPackage: "contextual",
 		},
 	}

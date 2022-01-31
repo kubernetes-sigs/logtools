@@ -34,6 +34,7 @@ import (
 const (
 	structuredCheck = "structured"
 	parametersCheck = "parameters"
+	contextualCheck = "contextual"
 )
 
 type checks map[string]*bool
@@ -53,6 +54,7 @@ func Analyser() *analysis.Analyzer {
 		enabled: checks{
 			structuredCheck: new(bool),
 			parametersCheck: new(bool),
+			contextualCheck: new(bool),
 		},
 	}
 	c.fileOverrides.validChecks = map[string]bool{}
@@ -64,6 +66,7 @@ func Analyser() *analysis.Analyzer {
 	logcheckFlags.BoolVar(c.enabled[structuredCheck], prefix+structuredCheck, true, `When true, logcheck will warn about calls to unstructured
 klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[parametersCheck], prefix+parametersCheck, true, `When true, logcheck will check parameters of structured logging calls.`)
+	logcheckFlags.BoolVar(c.enabled[contextualCheck], prefix+contextualCheck, false, `When true, logcheck will only allow log calls for contextual logging (retrieving a Logger from klog or the context and logging through that) and warn about all others.`)
 	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
 
 	// Use env variables as defaults. This is necessary when used as plugin
@@ -132,27 +135,33 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 
 		// Now we need to determine whether it is coming from klog.
 		if isKlog(selExpr.X, pass) {
+			if c.isEnabled(contextualCheck, filename) && !isContextualCall(fName) {
+				pass.Report(analysis.Diagnostic{
+					Pos:     fun.Pos(),
+					Message: fmt.Sprintf("function %q should not be used, convert to contextual logging", fName),
+				})
+				return
+			}
+
 			// Matching if any unstructured logging function is used.
-			if !isUnstructured((fName)) {
-				if c.isEnabled(parametersCheck, filename) {
-					// if format specifier is used, check for arg length will most probably fail
-					// so check for format specifier first and skip if found
-					if checkForFormatSpecifier(fexpr, pass) {
-						return
-					}
-					if fName == "InfoS" {
-						isKeysValid(args[1:], fun, pass, fName)
-					} else if fName == "ErrorS" {
-						isKeysValid(args[2:], fun, pass, fName)
-					}
+			if c.isEnabled(structuredCheck, filename) && isUnstructured(fName) {
+				pass.Report(analysis.Diagnostic{
+					Pos:     fun.Pos(),
+					Message: fmt.Sprintf("unstructured logging function %q should not be used", fName),
+				})
+				return
+			}
+
+			if c.isEnabled(parametersCheck, filename) {
+				// if format specifier is used, check for arg length will most probably fail
+				// so check for format specifier first and skip if found
+				if checkForFormatSpecifier(fexpr, pass) {
+					return
 				}
-			} else {
-				if c.isEnabled(structuredCheck, filename) {
-					msg := fmt.Sprintf("unstructured logging function %q should not be used", fName)
-					pass.Report(analysis.Diagnostic{
-						Pos:     fun.Pos(),
-						Message: msg,
-					})
+				if fName == "InfoS" {
+					isKeysValid(args[1:], fun, pass, fName)
+				} else if fName == "ErrorS" {
+					isKeysValid(args[2:], fun, pass, fName)
 				}
 
 				// Also check structured calls.
@@ -246,6 +255,39 @@ func isUnstructured(fName string) bool {
 	}
 
 	for _, name := range unstrucured {
+		if fName == name {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isContextualCall(fName string) bool {
+	// List of klog functions we still want to use after migration to
+	// contextual logging. This is an allow list, so any new acceptable
+	// klog call has to be added here.
+	contextual := []string{
+		"Background",
+		"ClearLogger",
+		"ContextualLogger",
+		"EnableContextualLogging",
+		"FlushAndExit",
+		"FlushLogger",
+		"FromContext",
+		"KObj",
+		"KObjs",
+		"KRef",
+		"LoggerWithName",
+		"LoggerWithValues",
+		"NewContext",
+		"SetLogger",
+		"SetLoggerWithOptions",
+		"StartFlushDaemon",
+		"StopFlushDaemon",
+		"TODO",
+	}
+	for _, name := range contextual {
 		if fName == name {
 			return true
 		}

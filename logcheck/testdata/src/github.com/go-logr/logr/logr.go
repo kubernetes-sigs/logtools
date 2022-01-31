@@ -18,6 +18,10 @@ limitations under the License.
 // with golang.org/x/tools/go/analysis/analysistest.
 package logr
 
+import (
+	"context"
+)
+
 type Logger struct{}
 
 func (l Logger) Enabled() bool                                  { return false }
@@ -26,3 +30,7 @@ func (l Logger) WithValues(kv ...interface{}) Logger            { return l }
 func (l Logger) V(level int) Logger                             { return l }
 func (l Logger) Info(msg string, kv ...interface{})             {}
 func (l Logger) Error(err error, msg string, kv ...interface{}) {}
+
+func NewContext(ctx context.Context, logger Logger) context.Context {
+	return nil
+}

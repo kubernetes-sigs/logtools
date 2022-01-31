@@ -19,6 +19,12 @@ limitations under the License.
 
 package v2
 
+import (
+	"context"
+
+	"github.com/go-logr/logr"
+)
+
 // Verbose is a boolean type that implements Infof (like Printf) etc.
 // See the documentation of V for more information.
 type Verbose struct {
@@ -26,6 +32,8 @@ type Verbose struct {
 }
 
 type Level int32
+
+type Logger = logr.Logger
 
 func V(level Level) Verbose {
 
@@ -201,4 +209,42 @@ func Exitln(args ...interface{}) {
 // Exitf logs to the FATAL, ERROR, WARNING, and INFO logs, then calls os.Exit(1).
 // Arguments are handled in the manner of fmt.Printf; a newline is appended if missing.
 func Exitf(format string, args ...interface{}) {
+}
+
+// KObj emulates klog.KObj
+func KObj(obj interface{}) interface{} {
+	return nil
+}
+
+// KObjs emulates klog.KObjs
+func KObjs(obj interface{}) interface{} {
+	return nil
+}
+
+func KRef(namespace, name string) interface{} {
+	return nil
+}
+
+func FromContext(ctx context.Context) Logger {
+	return Logger{}
+}
+
+func NewContext(ctx context.Context, logger Logger) context.Context {
+	return ctx
+}
+
+func LoggerWithName(logger Logger, name string) Logger {
+	return Logger{}
+}
+
+func LoggerWithValues(logger Logger, kvs ...interface{}) Logger {
+	return Logger{}
+}
+
+func TODO() Logger {
+	return Logger{}
+}
+
+func Background() Logger {
+	return Logger{}
 }
