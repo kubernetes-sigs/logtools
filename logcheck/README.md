@@ -73,3 +73,10 @@ key/value pairs in an `[]interface` variable before passing that on to a log
 call. Such valid code can use `nolint:logcheck` to disable the warning (when
 invoking logcheck through golangci-lint) or the `parameters` check can be
 disabled for the file.
+
+## with-helpers (disabled by default)
+
+`logr.Logger.WithName`, `logr.Logger.WithValues` and `logr.NewContext` must not
+be used.  The corresponding helper calls from `k8s.io/klogr` should be used
+instead. This is relevant when support contextual logging is disabled at
+runtime in klog.

@@ -96,6 +96,13 @@ func TestAnalyzer(t *testing.T) {
 			},
 			testPackage: "contextual",
 		},
+		{
+			name: "helpers",
+			enabled: map[string]string{
+				"with-helpers": "true",
+			},
+			testPackage: "helpers",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

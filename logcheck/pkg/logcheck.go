@@ -32,9 +32,10 @@ import (
 )
 
 const (
-	structuredCheck = "structured"
-	parametersCheck = "parameters"
-	contextualCheck = "contextual"
+	structuredCheck  = "structured"
+	parametersCheck  = "parameters"
+	contextualCheck  = "contextual"
+	withHelpersCheck = "with-helpers"
 )
 
 type checks map[string]*bool
@@ -52,9 +53,10 @@ func (c config) isEnabled(check string, filename string) bool {
 func Analyser() *analysis.Analyzer {
 	c := config{
 		enabled: checks{
-			structuredCheck: new(bool),
-			parametersCheck: new(bool),
-			contextualCheck: new(bool),
+			structuredCheck:  new(bool),
+			parametersCheck:  new(bool),
+			contextualCheck:  new(bool),
+			withHelpersCheck: new(bool),
 		},
 	}
 	c.fileOverrides.validChecks = map[string]bool{}
@@ -67,6 +69,7 @@ func Analyser() *analysis.Analyzer {
 klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[parametersCheck], prefix+parametersCheck, true, `When true, logcheck will check parameters of structured logging calls.`)
 	logcheckFlags.BoolVar(c.enabled[contextualCheck], prefix+contextualCheck, false, `When true, logcheck will only allow log calls for contextual logging (retrieving a Logger from klog or the context and logging through that) and warn about all others.`)
+	logcheckFlags.BoolVar(c.enabled[withHelpersCheck], prefix+withHelpersCheck, false, `When true, logcheck will warn about direct calls to WithName, WithValues and NewContext.`)
 	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
 
 	// Use env variables as defaults. This is necessary when used as plugin
@@ -181,7 +184,24 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 					isKeysValid(args[2:], fun, pass, fName)
 				}
 			}
+			if c.isEnabled(withHelpersCheck, filename) {
+				switch fName {
+				case "WithValues", "WithName":
+					pass.Report(analysis.Diagnostic{
+						Pos:     fun.Pos(),
+						Message: fmt.Sprintf("function %q should be called through klogr.Logger%s", fName, fName),
+					})
+				}
+			}
+		} else if fName == "NewContext" &&
+			isPackage(selExpr.X, "github.com/go-logr/logr", pass) &&
+			c.isEnabled(withHelpersCheck, filename) {
+			pass.Report(analysis.Diagnostic{
+				Pos:     fun.Pos(),
+				Message: fmt.Sprintf("function %q should be called through klogr.NewContext", fName),
+			})
 		}
+
 	}
 }
 
@@ -212,12 +232,18 @@ func isKlog(expr ast.Expr, pass *analysis.Pass) bool {
 
 	// In "klog.Info", "klog" is a package identifier. It doesn't need to
 	// be "klog" because here we look up the actual package.
+	return isPackage(expr, "k8s.io/klog/v2", pass)
+}
+
+// isPackage checks whether an expression is an identifier that refers
+// to a specific package like k8s.io/klog/v2.
+func isPackage(expr ast.Expr, packagePath string, pass *analysis.Pass) bool {
 	if ident, ok := expr.(*ast.Ident); ok {
 		if object, ok := pass.TypesInfo.Uses[ident]; ok {
 			switch object := object.(type) {
 			case *types.PkgName:
 				pkg := object.Imported()
-				if pkg.Path() == "k8s.io/klog/v2" {
+				if pkg.Path() == packagePath {
 					return true
 				}
 			}
