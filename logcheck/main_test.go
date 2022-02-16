@@ -38,6 +38,11 @@ func TestAnalyzer(t *testing.T) {
 			allowUnstructured: "false",
 			testPackage:       "doNotAllowUnstructuredLogs",
 		},
+		{
+			name:              "Function call parameters",
+			allowUnstructured: "true",
+			testPackage:       "parameters",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
