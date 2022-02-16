@@ -112,6 +112,9 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 					Pos:     fun.Pos(),
 					Message: msg,
 				})
+			} else {
+				// Also check non-structured calls.
+				checkForFormatSpecifier(fexpr, pass)
 			}
 		}
 	}
@@ -180,8 +183,12 @@ func checkForFormatSpecifier(expr *ast.CallExpr, pass *analysis.Pass) bool {
 	if selExpr, ok := expr.Fun.(*ast.SelectorExpr); ok {
 		// extracting function Name like Infof
 		fName := selExpr.Sel.Name
+		if strings.HasSuffix(fName, "f") {
+			// Allowed for calls like Infof.
+			return false
+		}
 		if specifier, found := hasFormatSpecifier(expr.Args); found {
-			msg := fmt.Sprintf("structured logging function %q should not use format specifier %q", fName, specifier)
+			msg := fmt.Sprintf("logging function %q should not use format specifier %q", fName, specifier)
 			pass.Report(analysis.Diagnostic{
 				Pos:     expr.Fun.Pos(),
 				Message: msg,

@@ -29,17 +29,17 @@ import (
 func parameterCalls() {
 	// format strings (incomplete list...)
 	klog.Infof("%d", 1)
-	klog.InfoS("%d", 1)  // want `structured logging function "InfoS" should not use format specifier "%d"`
-	klog.Info("%d", 1)   // TODO: not detected
-	klog.Infoln("%d", 1) // TODO: not detected
+	klog.InfoS("%d", 1)  // want `logging function "InfoS" should not use format specifier "%d"`
+	klog.Info("%d", 1)   // want `logging function "Info" should not use format specifier "%d"`
+	klog.Infoln("%d", 1) // want `logging function "Infoln" should not use format specifier "%d"`
 	klog.V(1).Infof("%d", 1)
-	klog.V(1).InfoS("%d", 1)  // want `structured logging function "InfoS" should not use format specifier "%d"`
-	klog.V(1).Info("%d", 1)   // TODO: not detected
-	klog.V(1).Infoln("%d", 1) // TODO: not detected
+	klog.V(1).InfoS("%d", 1)  // want `logging function "InfoS" should not use format specifier "%d"`
+	klog.V(1).Info("%d", 1)   // want `logging function "Info" should not use format specifier "%d"`
+	klog.V(1).Infoln("%d", 1) // want `logging function "Infoln" should not use format specifier "%d"`
 	klog.Errorf("%d", 1)
-	klog.ErrorS(nil, "%d", 1) // want `structured logging function "ErrorS" should not use format specifier "%d"`
-	klog.Error("%d", 1)       // TODO: not detected
-	klog.Errorln("%d", 1)     // TODO: not detected
+	klog.ErrorS(nil, "%d", 1) // want `logging function "ErrorS" should not use format specifier "%d"`
+	klog.Error("%d", 1)       // want `logging function "Error" should not use format specifier "%d"`
+	klog.Errorln("%d", 1)     // want `logging function "Errorln" should not use format specifier "%d"`
 
 	klog.InfoS("hello", "value", fmt.Sprintf("%d", 1))
 
