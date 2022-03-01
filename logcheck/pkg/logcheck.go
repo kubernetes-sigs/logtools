@@ -340,14 +340,14 @@ func isKeysValid(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funNam
 		if !ok {
 			pass.Report(analysis.Diagnostic{
 				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value", arg),
+				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", arg),
 			})
 			continue
 		}
 		if lit.Kind != token.STRING {
 			pass.Report(analysis.Diagnostic{
 				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value", lit.Value),
+				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", lit.Value),
 			})
 			continue
 		}
@@ -492,7 +492,7 @@ func checkForIfEnabled(i *ast.IfStmt, pass *analysis.Pass, c *config) {
 	pass.Report(analysis.Diagnostic{
 		Pos: i.Pos(),
 		End: i.End(),
-		Message: fmt.Sprintf("The result of %s should be stored in a variable and then be used multiple times: if %s := %s(); %s.Enabled() { ... %s.Info ... }",
+		Message: fmt.Sprintf("the result of %s should be stored in a variable and then be used multiple times: if %s := %s(); %s.Enabled() { ... %s.Info ... }",
 			funcCall, varName, funcCall, varName, varName),
 	})
 }

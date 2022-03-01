@@ -37,11 +37,11 @@ func verboseLogging() {
 	// \(\) is actually () in the diagnostic output. We have to escape here
 	// because `want` expects a regular expression.
 
-	if klog.V(1).Enabled() { // want `The result of klog.V should be stored in a variable and then be used multiple times: if klogV := klog.V\(\); klogV.Enabled\(\) { ... klogV.Info ... }`
+	if klog.V(1).Enabled() { // want `the result of klog.V should be stored in a variable and then be used multiple times: if klogV := klog.V\(\); klogV.Enabled\(\) { ... klogV.Info ... }`
 		klog.V(1).InfoS("I'm logging at level 1.")
 	}
 
-	if l.V(1).Enabled() { // want `The result of l.V should be stored in a variable and then be used multiple times: if l := l.V\(\); l.Enabled\(\) { ... l.Info ... }`
+	if l.V(1).Enabled() { // want `the result of l.V should be stored in a variable and then be used multiple times: if l := l.V\(\); l.Enabled\(\) { ... l.Info ... }`
 		l.V(1).Info("I'm logging at level 1.")
 	}
 
