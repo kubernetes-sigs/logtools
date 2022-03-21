@@ -14,14 +14,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+// This fake package is created as golang.org/x/tools/go/analysis/analysistest
+// expects it to be here for loading. This package is used to test allow-unstructured
+// flag which suppresses errors when unstructured logging is used.
+// This is a test file for unstructured logging static check tool unit tests.
+
+package mixed
 
 import (
-	"golang.org/x/tools/go/analysis/singlechecker"
-
-	"sigs.k8s.io/logtools/logcheck/pkg"
+	klog "k8s.io/klog/v2"
 )
 
-func main() {
-	singlechecker.Main(pkg.Analyser())
+func dontAllowUnstructuredLogs() {
+	klog.Info("test log") // want `unstructured logging function "Info" should not be used`
 }

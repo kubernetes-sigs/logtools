@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Kubernetes Authors.
+Copyright 2022 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,14 +14,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package main is meant to be compiled as a plugin for golangci-lint, see
+// https://golangci-lint.run/contributing/new-linters/#create-a-plugin.
 package main
 
 import (
-	"golang.org/x/tools/go/analysis/singlechecker"
-
+	"golang.org/x/tools/go/analysis"
 	"sigs.k8s.io/logtools/logcheck/pkg"
 )
 
-func main() {
-	singlechecker.Main(pkg.Analyser())
+type analyzerPlugin struct{}
+
+func (*analyzerPlugin) GetAnalyzers() []*analysis.Analyzer {
+	return []*analysis.Analyzer{
+		pkg.Analyser(),
+	}
 }
+
+// AnalyzerPlugin is the entry point for golangci-lint.
+var AnalyzerPlugin analyzerPlugin

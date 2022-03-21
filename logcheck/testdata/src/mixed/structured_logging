@@ -1,0 +1,6 @@
+# This file contains regular expressions that are matched against <pkg>/<file>,
+# for example k8s.io/cmd/kube-scheduler/app/config/config.go.
+#
+# Any file that is matched may only use structured logging calls.
+
+structured .*doNotAllowUnstructuredLogs.go
