@@ -88,8 +88,7 @@ func (f *RegexpFilter) Set(filename string) error {
 			line.enabled[c] = enabled
 		}
 
-		// Must match entire string.
-		re, err := regexp.Compile("^" + parts[1] + "$")
+		re, err := regexp.Compile(parts[1])
 		if err != nil {
 			return fmt.Errorf("%s:%d: %v", filename, lineNr, err)
 		}
@@ -106,11 +105,25 @@ func (f *RegexpFilter) Set(filename string) error {
 // Enabled checks whether a certain check is enabled for a file.
 func (f *RegexpFilter) Enabled(check string, enabled bool, filename string) bool {
 	for _, l := range f.lines {
-		if l.match.MatchString(filename) {
+		// Must match entire string.
+		if matchFullString(filename, l.match) {
 			if e, ok := l.enabled[check]; ok {
 				enabled = e
 			}
 		}
 	}
 	return enabled
+}
+
+func matchFullString(str string, re *regexp.Regexp) bool {
+	loc := re.FindStringIndex(str)
+	if loc == nil {
+		// No match at all.
+		return false
+	}
+	if loc[1]-loc[0] < len(str) {
+		// Only matches a substring.
+		return false
+	}
+	return true
 }

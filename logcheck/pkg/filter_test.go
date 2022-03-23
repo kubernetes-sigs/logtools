@@ -116,7 +116,11 @@ func TestParsing(t *testing.T) {
 	}{
 		"invalid-regexp": {
 			content:     `structured [`,
-			expectError: filename + ":0: error parsing regexp: missing closing ]: `[$`",
+			expectError: filename + ":0: error parsing regexp: missing closing ]: `[`",
+		},
+		"wildcard": {
+			content:     `structured *`,
+			expectError: filename + ":0: error parsing regexp: missing argument to repetition operator: `*`",
 		},
 		"invalid-line": {
 			content: `structured .
