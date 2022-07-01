@@ -302,7 +302,7 @@ func isContextualCall(fName string) bool {
 		"FlushLogger",
 		"FromContext",
 		"KObj",
-		"KObjs",
+		"KObjSlice",
 		"KRef",
 		"LoggerWithName",
 		"LoggerWithValues",
