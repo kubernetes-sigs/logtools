@@ -37,6 +37,7 @@ const (
 	contextualCheck    = "contextual"
 	withHelpersCheck   = "with-helpers"
 	verbosityZeroCheck = "verbosity-zero"
+	deprecationsCheck  = "deprecations"
 )
 
 type checks map[string]*bool
@@ -59,6 +60,7 @@ func Analyser() *analysis.Analyzer {
 			contextualCheck:    new(bool),
 			withHelpersCheck:   new(bool),
 			verbosityZeroCheck: new(bool),
+			deprecationsCheck:  new(bool),
 		},
 	}
 	c.fileOverrides.validChecks = map[string]bool{}
@@ -73,6 +75,7 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[contextualCheck], prefix+contextualCheck, false, `When true, logcheck will only allow log calls for contextual logging (retrieving a Logger from klog or the context and logging through that) and warn about all others.`)
 	logcheckFlags.BoolVar(c.enabled[withHelpersCheck], prefix+withHelpersCheck, false, `When true, logcheck will warn about direct calls to WithName, WithValues and NewContext.`)
 	logcheckFlags.BoolVar(c.enabled[verbosityZeroCheck], prefix+verbosityZeroCheck, true, `When true, logcheck will check whether the parameter for V() is 0.`)
+	logcheckFlags.BoolVar(c.enabled[deprecationsCheck], prefix+deprecationsCheck, true, `When true, logcheck will analyze the usage of deprecated Klog function calls.`)
 	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
 
 	// Use env variables as defaults. This is necessary when used as plugin
@@ -147,6 +150,17 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 					Message: fmt.Sprintf("function %q should not be used, convert to contextual logging", fName),
 				})
 				return
+			}
+
+			// Check for Deprecated function usage
+			if c.isEnabled(deprecationsCheck, filename) {
+				message, deprecatedUse := isDeprecatedContextualCall(fName)
+				if deprecatedUse {
+					pass.Report(analysis.Diagnostic{
+						Pos:     fun.Pos(),
+						Message: message,
+					})
+				}
 			}
 
 			// Matching if any unstructured logging function is used.
@@ -301,6 +315,18 @@ func isUnstructured(fName string) bool {
 	return false
 }
 
+func isDeprecatedContextualCall(fName string) (message string, deprecatedUse bool) {
+	deprecatedContextualLogHelper := map[string]string{
+		"KObjs": "KObjSlice",
+	}
+	var replacementFunction string
+	if replacementFunction, deprecatedUse = deprecatedContextualLogHelper[fName]; deprecatedUse {
+		message = fmt.Sprintf(`Detected usage of deprecated helper "%s". Please switch to "%s" instead.`, fName, replacementFunction)
+		return
+	}
+	return
+}
+
 func isContextualCall(fName string) bool {
 	// List of klog functions we still want to use after migration to
 	// contextual logging. This is an allow list, so any new acceptable
@@ -315,6 +341,7 @@ func isContextualCall(fName string) bool {
 		"FromContext",
 		"KObj",
 		"KObjs",
+		"KObjSlice",
 		"KRef",
 		"LoggerWithName",
 		"LoggerWithValues",
@@ -519,7 +546,7 @@ func checkForVerbosityZero(fexpr *ast.CallExpr, pass *analysis.Pass) {
 		return
 	}
 	if isVerbosityZero(expr) {
-		msg := fmt.Sprintf("Logging with V(0) is semantically equivalent to the same expression without it and just causes unnecessary overhead. It should get removed.")
+		msg := "Logging with V(0) is semantically equivalent to the same expression without it and just causes unnecessary overhead. It should get removed."
 		pass.Report(analysis.Diagnostic{
 			Pos:     fexpr.Fun.Pos(),
 			Message: msg,

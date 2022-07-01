@@ -80,3 +80,12 @@ disabled for the file.
 be used.  The corresponding helper calls from `k8s.io/klogr` should be used
 instead. This is relevant when support contextual logging is disabled at
 runtime in klog.
+
+## verbosity-zero (enabled by default)
+
+This check flags all invocation of `klog.V(0)` or any of it's equivalent as errors
+
+## deprecations (enabled by default)
+
+This checks detects the usage of deprecated `klog` helper functions such as `KObjs` and suggests
+a suitable alternative to replace them with.
