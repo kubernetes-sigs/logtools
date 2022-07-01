@@ -27,7 +27,7 @@ import (
 
 func allowKlog() {
 	klog.KObj(nil)
-	klog.KObjs(nil)
+	klog.KObjSlice(nil)
 	klog.KRef("", "")
 	klog.FromContext(nil)
 	klog.TODO()
