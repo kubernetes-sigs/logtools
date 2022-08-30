@@ -103,6 +103,21 @@ func TestAnalyzer(t *testing.T) {
 			},
 			testPackage: "helpers",
 		},
+		{
+			name: "Do not allow Verbosity Zero logs",
+			enabled: map[string]string{
+				"structured": "false",
+			},
+			testPackage: "doNotAllowVerbosityZeroLogs",
+		},
+		{
+			name: "Allow Verbosity Zero logs",
+			enabled: map[string]string{
+				"structured":     "false",
+				"verbosity-zero": "false",
+			},
+			testPackage: "allowVerbosityZeroLogs",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

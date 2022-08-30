@@ -32,10 +32,11 @@ import (
 )
 
 const (
-	structuredCheck  = "structured"
-	parametersCheck  = "parameters"
-	contextualCheck  = "contextual"
-	withHelpersCheck = "with-helpers"
+	structuredCheck    = "structured"
+	parametersCheck    = "parameters"
+	contextualCheck    = "contextual"
+	withHelpersCheck   = "with-helpers"
+	verbosityZeroCheck = "verbosity-zero"
 )
 
 type checks map[string]*bool
@@ -53,10 +54,11 @@ func (c config) isEnabled(check string, filename string) bool {
 func Analyser() *analysis.Analyzer {
 	c := config{
 		enabled: checks{
-			structuredCheck:  new(bool),
-			parametersCheck:  new(bool),
-			contextualCheck:  new(bool),
-			withHelpersCheck: new(bool),
+			structuredCheck:    new(bool),
+			parametersCheck:    new(bool),
+			contextualCheck:    new(bool),
+			withHelpersCheck:   new(bool),
+			verbosityZeroCheck: new(bool),
 		},
 	}
 	c.fileOverrides.validChecks = map[string]bool{}
@@ -70,6 +72,7 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[parametersCheck], prefix+parametersCheck, true, `When true, logcheck will check parameters of structured logging calls.`)
 	logcheckFlags.BoolVar(c.enabled[contextualCheck], prefix+contextualCheck, false, `When true, logcheck will only allow log calls for contextual logging (retrieving a Logger from klog or the context and logging through that) and warn about all others.`)
 	logcheckFlags.BoolVar(c.enabled[withHelpersCheck], prefix+withHelpersCheck, false, `When true, logcheck will warn about direct calls to WithName, WithValues and NewContext.`)
+	logcheckFlags.BoolVar(c.enabled[verbosityZeroCheck], prefix+verbosityZeroCheck, true, `When true, logcheck will check whether the parameter for V() is 0.`)
 	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
 
 	// Use env variables as defaults. This is necessary when used as plugin
@@ -172,6 +175,11 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 					checkForFormatSpecifier(fexpr, pass)
 				}
 			}
+			// verbosity Zero Check
+			if c.isEnabled(verbosityZeroCheck, filename) {
+				checkForVerbosityZero(fexpr, pass)
+			}
+
 		} else if isGoLogger(selExpr.X, pass) {
 			if c.isEnabled(parametersCheck, filename) {
 				checkForFormatSpecifier(fexpr, pass)
@@ -192,6 +200,10 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 						Message: fmt.Sprintf("function %q should be called through klogr.Logger%s", fName, fName),
 					})
 				}
+			}
+			// verbosity Zero Check
+			if c.isEnabled(verbosityZeroCheck, filename) {
+				checkForVerbosityZero(fexpr, pass)
 			}
 		} else if fName == "NewContext" &&
 			isPackage(selExpr.X, "github.com/go-logr/logr", pass) &&
@@ -495,4 +507,48 @@ func checkForIfEnabled(i *ast.IfStmt, pass *analysis.Pass, c *config) {
 		Message: fmt.Sprintf("the result of %s should be stored in a variable and then be used multiple times: if %s := %s(); %s.Enabled() { ... %s.Info ... }",
 			funcCall, varName, funcCall, varName, varName),
 	})
+}
+
+func checkForVerbosityZero(fexpr *ast.CallExpr, pass *analysis.Pass) {
+	iselExpr, ok := fexpr.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return
+	}
+	expr := iselExpr.X
+	if !isKlogVerbose(expr, pass) && !isGoLogger(expr, pass) {
+		return
+	}
+	if isVerbosityZero(expr) {
+		msg := fmt.Sprintf("Logging with V(0) is semantically equivalent to the same expression without it and just causes unnecessary overhead. It should get removed.")
+		pass.Report(analysis.Diagnostic{
+			Pos:     fexpr.Fun.Pos(),
+			Message: msg,
+		})
+	}
+}
+
+func isVerbosityZero(expr ast.Expr) bool {
+	subCallExpr, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	subSelExpr, ok := subCallExpr.Fun.(*ast.SelectorExpr)
+	if !ok || subSelExpr.Sel.Name != "V" || len(subCallExpr.Args) != 1 {
+		return false
+	}
+
+	if lit, ok := subCallExpr.Args[0].(*ast.BasicLit); ok && lit.Value == "0" {
+		return true
+	}
+
+	if id, ok := subCallExpr.Args[0].(*ast.Ident); ok && id.Obj.Kind == 2 {
+		v, ok := id.Obj.Decl.(*ast.ValueSpec)
+		if !ok || len(v.Values) != 1 {
+			return false
+		}
+		if lit, ok := v.Values[0].(*ast.BasicLit); ok && lit.Value == "0" {
+			return true
+		}
+	}
+	return false
 }
