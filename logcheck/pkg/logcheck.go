@@ -537,11 +537,15 @@ func isVerbosityZero(expr ast.Expr) bool {
 		return false
 	}
 
-	if lit, ok := subCallExpr.Args[0].(*ast.BasicLit); ok && lit.Value == "0" {
-		return true
+	if lit, ok := subCallExpr.Args[0].(*ast.BasicLit); ok {
+		if lit.Value == "0" {
+			return true
+		}
+		return false
 	}
 
-	if id, ok := subCallExpr.Args[0].(*ast.Ident); ok && id.Obj.Kind == 2 {
+	// When Constants of value is defined in different files, the id.Obj will be nil, we should filter this condition.
+	if id, ok := subCallExpr.Args[0].(*ast.Ident); ok && id.Obj != nil && id.Obj.Kind == 2 {
 		v, ok := id.Obj.Decl.(*ast.ValueSpec)
 		if !ok || len(v.Values) != 1 {
 			return false
