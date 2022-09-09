@@ -47,6 +47,7 @@ func verbosityLogging() {
 	klog.V(1).Info("test log")
 	klog.V(1).Infof("test log")
 	klog.V(1).Infoln("test log")
+	klog.V(LogLevel).InfoS("I'm logging at level 4.")
 	klog.V(1).InfoS("I'm logging at level 1.")
 	klog.V(oneConst).InfoS("I'm logging at level 1.")
 	klog.V(oneVar).InfoS("I'm logging at level 1.")
