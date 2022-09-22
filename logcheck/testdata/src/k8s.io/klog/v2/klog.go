@@ -221,6 +221,11 @@ func KObjs(obj interface{}) interface{} {
 	return nil
 }
 
+// KObjSlice emulates klog.KObjSlice
+func KObjSlice(obj interface{}) interface{} {
+	return nil
+}
+
 func KRef(namespace, name string) interface{} {
 	return nil
 }

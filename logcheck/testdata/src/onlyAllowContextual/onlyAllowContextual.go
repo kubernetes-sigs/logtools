@@ -29,4 +29,7 @@ func doNotAlllowKlog() {
 	klog.InfoS("test log")       // want `function "InfoS" should not be used, convert to contextual logging`
 	klog.ErrorS(nil, "test log") // want `function "ErrorS" should not be used, convert to contextual logging`
 	klog.V(1).Infof("test log")  // want `function "V" should not be used, convert to contextual logging` `function "Infof" should not be used, convert to contextual logging`
+
+	klog.KObjs(nil)                                // want `Detected usage of deprecated helper "KObjs". Please switch to "KObjSlice" instead.`
+	klog.InfoS("test log", "key", klog.KObjs(nil)) // want `function "InfoS" should not be used, convert to contextual logging` `Detected usage of deprecated helper "KObjs". Please switch to "KObjSlice" instead.`
 }
