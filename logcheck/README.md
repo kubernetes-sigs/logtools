@@ -85,6 +85,11 @@ runtime in klog.
 
 This check flags all invocation of `klog.V(0)` or any of it's equivalent as errors
 
+## key (enabled by default)
+
+This check flags check whether name arguments are valid keys according to the
+[Kubernetes guidelines](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments).
+
 ## deprecations (enabled by default)
 
 This checks detects the usage of deprecated `klog` helper functions such as `KObjs` and suggests
