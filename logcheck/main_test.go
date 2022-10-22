@@ -35,11 +35,15 @@ func TestAnalyzer(t *testing.T) {
 			name: "Allow unstructured logs",
 			enabled: map[string]string{
 				"structured": "false",
+				"key":        "false",
 			},
 			testPackage: "allowUnstructuredLogs",
 		},
 		{
-			name:        "Do not allow unstructured logs",
+			name: "Do not allow unstructured logs",
+			enabled: map[string]string{
+				"key": "false",
+			},
 			testPackage: "doNotAllowUnstructuredLogs",
 		},
 		{
@@ -54,6 +58,7 @@ func TestAnalyzer(t *testing.T) {
 			name: "Function call parameters",
 			enabled: map[string]string{
 				"structured": "false",
+				"key":        "false",
 			},
 			testPackage: "parameters",
 		},
@@ -86,6 +91,7 @@ func TestAnalyzer(t *testing.T) {
 			name: "gologr",
 			enabled: map[string]string{
 				"contextual": "true",
+				"key":        "false",
 			},
 			testPackage: "gologr",
 		},
@@ -107,6 +113,7 @@ func TestAnalyzer(t *testing.T) {
 			name: "Do not allow Verbosity Zero logs",
 			enabled: map[string]string{
 				"structured": "false",
+				"key":        "false",
 			},
 			testPackage: "doNotAllowVerbosityZeroLogs",
 		},
@@ -115,8 +122,26 @@ func TestAnalyzer(t *testing.T) {
 			enabled: map[string]string{
 				"structured":     "false",
 				"verbosity-zero": "false",
+				"key":            "false",
 			},
 			testPackage: "allowVerbosityZeroLogs",
+		},
+		{
+			name: "Do not allow Bad Keys logs",
+			enabled: map[string]string{
+				"structured": "false",
+				"parameters": "false",
+			},
+			testPackage: "doNotAllowBadkeysLogs",
+		},
+		{
+			name: "Allow Bad Keys logs",
+			enabled: map[string]string{
+				"structured": "false",
+				"parameters": "false",
+				"key":        "false",
+			},
+			testPackage: "allowBadkeysLogs",
 		},
 	}
 	for _, tc := range tests {

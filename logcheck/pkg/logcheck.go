@@ -24,6 +24,7 @@ import (
 	"go/types"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -37,6 +38,7 @@ const (
 	contextualCheck    = "contextual"
 	withHelpersCheck   = "with-helpers"
 	verbosityZeroCheck = "verbosity-zero"
+	keyCheck           = "key"
 	deprecationsCheck  = "deprecations"
 )
 
@@ -60,6 +62,7 @@ func Analyser() *analysis.Analyzer {
 			contextualCheck:    new(bool),
 			withHelpersCheck:   new(bool),
 			verbosityZeroCheck: new(bool),
+			keyCheck:           new(bool),
 			deprecationsCheck:  new(bool),
 		},
 	}
@@ -75,6 +78,7 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[contextualCheck], prefix+contextualCheck, false, `When true, logcheck will only allow log calls for contextual logging (retrieving a Logger from klog or the context and logging through that) and warn about all others.`)
 	logcheckFlags.BoolVar(c.enabled[withHelpersCheck], prefix+withHelpersCheck, false, `When true, logcheck will warn about direct calls to WithName, WithValues and NewContext.`)
 	logcheckFlags.BoolVar(c.enabled[verbosityZeroCheck], prefix+verbosityZeroCheck, true, `When true, logcheck will check whether the parameter for V() is 0.`)
+	logcheckFlags.BoolVar(c.enabled[keyCheck], prefix+keyCheck, true, `When true, logcheck will check whether name arguments are valid keys according to the guidelines in (https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments).`)
 	logcheckFlags.BoolVar(c.enabled[deprecationsCheck], prefix+deprecationsCheck, true, `When true, logcheck will analyze the usage of deprecated Klog function calls.`)
 	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
 
@@ -193,7 +197,19 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 			if c.isEnabled(verbosityZeroCheck, filename) {
 				checkForVerbosityZero(fexpr, pass)
 			}
-
+			// key Check
+			if c.isEnabled(keyCheck, filename) {
+				// if format specifier is used, check for arg length will most probably fail
+				// so check for format specifier first and skip if found
+				if checkFormatSpecifier(fexpr, pass) {
+					return
+				}
+				if fName == "InfoS" {
+					keysCheck(args[1:], fun, pass, fName)
+				} else if fName == "ErrorS" {
+					keysCheck(args[2:], fun, pass, fName)
+				}
+			}
 		} else if isGoLogger(selExpr.X, pass) {
 			if c.isEnabled(parametersCheck, filename) {
 				checkForFormatSpecifier(fexpr, pass)
@@ -218,6 +234,22 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 			// verbosity Zero Check
 			if c.isEnabled(verbosityZeroCheck, filename) {
 				checkForVerbosityZero(fexpr, pass)
+			}
+			// key Check
+			if c.isEnabled(keyCheck, filename) {
+				// if format specifier is used, check for arg length will most probably fail
+				// so check for format specifier first and skip if found
+				if checkFormatSpecifier(fexpr, pass) {
+					return
+				}
+				switch fName {
+				case "WithValues":
+					keysCheck(args, fun, pass, fName)
+				case "Info":
+					keysCheck(args[1:], fun, pass, fName)
+				case "Error":
+					keysCheck(args[2:], fun, pass, fName)
+				}
 			}
 		} else if fName == "NewContext" &&
 			isPackage(selExpr.X, "github.com/go-logr/logr", pass) &&
@@ -582,4 +614,53 @@ func isVerbosityZero(expr ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+func checkFormatSpecifier(expr *ast.CallExpr, pass *analysis.Pass) bool {
+	if _, ok := expr.Fun.(*ast.SelectorExpr); ok {
+		if _, found := hasFormatSpecifier(expr.Args); found {
+			return true
+		}
+	}
+	return false
+}
+
+// keysCheck check if all keys in keyAndValues are valid keys according to the guidelines.
+func keysCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName string) {
+	if len(keyValues)%2 != 0 {
+		pass.Report(analysis.Diagnostic{
+			Pos:     fun.Pos(),
+			Message: fmt.Sprintf("Additional arguments to %s should always be Key Value pairs. Please check if there is any key or value missing.", funName),
+		})
+		return
+	}
+
+	for index, arg := range keyValues {
+		if index%2 != 0 {
+			continue
+		}
+		lit, ok := arg.(*ast.BasicLit)
+		if !ok {
+			pass.Report(analysis.Diagnostic{
+				Pos:     fun.Pos(),
+				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", arg),
+			})
+			continue
+		}
+		if lit.Kind != token.STRING {
+			pass.Report(analysis.Diagnostic{
+				Pos:     fun.Pos(),
+				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", lit.Value),
+			})
+			continue
+		}
+		keyMatchRe := regexp.MustCompile(`(^[A-Z]{2,}|^[a-z])[[:alnum:]]*$`)
+		match := keyMatchRe.Match([]byte(strings.Trim(lit.Value, "\"")))
+		if !match {
+			pass.Report(analysis.Diagnostic{
+				Pos:     fun.Pos(),
+				Message: fmt.Sprintf("Key positional arguments %s are expected to no special characters. Please refer to https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments.", lit.Value),
+			})
+		}
+	}
 }
