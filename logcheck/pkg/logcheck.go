@@ -371,6 +371,7 @@ func isContextualCall(fName string) bool {
 		"FlushAndExit",
 		"FlushLogger",
 		"FromContext",
+		"InitFlags",
 		"KObj",
 		"KObjs",
 		"KObjSlice",
