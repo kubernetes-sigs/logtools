@@ -47,11 +47,14 @@ the next section.
 
 Unstructured klog logging calls are flagged as error.
 
-## klog (disabled by default)
+## contextual (disabled by default)
 
 None of the klog logging methods may be used. This is even stricter than
 `unstructured`. Instead, code should retrieve a logr.Logger from klog and log
 through that.
+
+klog calls that are needed to manage contextual logging, for example
+`klog.Background`, are still allowed.
 
 ## parameters (enabled by default)
 
