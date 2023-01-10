@@ -660,7 +660,7 @@ func keysCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName 
 		if !match {
 			pass.Report(analysis.Diagnostic{
 				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments %s are expected to no special characters. Please refer to https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments.", lit.Value),
+				Message: fmt.Sprintf("Key positional arguments %s are expected to be alphanumeric and start with either one lowercase or two uppercase letters. Please refer to https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments.", lit.Value),
 			})
 		}
 	}
