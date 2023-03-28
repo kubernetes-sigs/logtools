@@ -39,6 +39,7 @@ const (
 	withHelpersCheck   = "with-helpers"
 	verbosityZeroCheck = "verbosity-zero"
 	keyCheck           = "key"
+	valueCheck         = "value"
 	deprecationsCheck  = "deprecations"
 )
 
@@ -63,6 +64,7 @@ func Analyser() *analysis.Analyzer {
 			withHelpersCheck:   new(bool),
 			verbosityZeroCheck: new(bool),
 			keyCheck:           new(bool),
+			valueCheck:         new(bool),
 			deprecationsCheck:  new(bool),
 		},
 	}
@@ -79,6 +81,7 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[withHelpersCheck], prefix+withHelpersCheck, false, `When true, logcheck will warn about direct calls to WithName, WithValues and NewContext.`)
 	logcheckFlags.BoolVar(c.enabled[verbosityZeroCheck], prefix+verbosityZeroCheck, true, `When true, logcheck will check whether the parameter for V() is 0.`)
 	logcheckFlags.BoolVar(c.enabled[keyCheck], prefix+keyCheck, true, `When true, logcheck will check whether name arguments are valid keys according to the guidelines in (https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments).`)
+	logcheckFlags.BoolVar(c.enabled[valueCheck], prefix+valueCheck, false, `When true, logcheck will check for problematic values (for example, types that have an incomplete fmt.Stringer implementation).`)
 	logcheckFlags.BoolVar(c.enabled[deprecationsCheck], prefix+deprecationsCheck, true, `When true, logcheck will analyze the usage of deprecated Klog function calls.`)
 	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
 
@@ -145,6 +148,7 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 		fName := selExpr.Sel.Name
 
 		filename := pass.Pkg.Path() + "/" + path.Base(pass.Fset.Position(fexpr.Pos()).Filename)
+		valueCheckEnabled := c.isEnabled(valueCheck, filename)
 		keyCheckEnabled := c.isEnabled(keyCheck, filename)
 		parametersCheckEnabled := c.isEnabled(parametersCheck, filename)
 
@@ -178,7 +182,7 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 				return
 			}
 
-			if keyCheckEnabled || parametersCheckEnabled {
+			if keyCheckEnabled || parametersCheckEnabled || valueCheckEnabled {
 				// if format specifier is used, check for arg length will most probably fail
 				// so check for format specifier first and skip if found
 				if parametersCheckEnabled && checkForFormatSpecifier(fexpr, pass) {
@@ -186,9 +190,9 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 				}
 				switch fName {
 				case "InfoS":
-					kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
+					kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
 				case "ErrorS":
-					kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
+					kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
 				}
 			}
 			// verbosity Zero Check
@@ -196,7 +200,7 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 				checkForVerbosityZero(fexpr, pass)
 			}
 		} else if isGoLogger(selExpr.X, pass) {
-			if keyCheckEnabled || parametersCheckEnabled {
+			if keyCheckEnabled || parametersCheckEnabled || valueCheckEnabled {
 				// if format specifier is used, check for arg length will most probably fail
 				// so check for format specifier first and skip if found
 				if parametersCheckEnabled && checkForFormatSpecifier(fexpr, pass) {
@@ -204,11 +208,11 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 				}
 				switch fName {
 				case "WithValues":
-					kvCheck(args, fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
+					kvCheck(args, fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
 				case "Info":
-					kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
+					kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
 				case "Error":
-					kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
+					kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
 				}
 			}
 			if c.isEnabled(withHelpersCheck, filename) {
@@ -551,7 +555,7 @@ func isVerbosityZero(expr ast.Expr) bool {
 
 // kvCheck check if all keys in keyAndValues are valid keys according to the guidelines
 // and that the values can be formatted.
-func kvCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName string, keyCheckEnabled, parametersCheckEnabled bool) {
+func kvCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName string, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled bool) {
 	if len(keyValues)%2 != 0 {
 		pass.Report(analysis.Diagnostic{
 			Pos:     fun.Pos(),
@@ -561,51 +565,120 @@ func kvCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName st
 	}
 
 	for index, arg := range keyValues {
-		if index%2 != 0 {
-			continue
+		switch index % 2 {
+		case 0:
+			// Key in key/value pair.
+			checkKey(arg, pass, keyCheckEnabled, parametersCheckEnabled)
+		case 1:
+			// Value in key/value pair.
+			checkValue(arg, pass, valueCheckEnabled)
 		}
+	}
+}
 
-		// Check keys?
-		if !keyCheckEnabled && !parametersCheckEnabled {
-			continue
-		}
-		lit, ok := arg.(*ast.BasicLit)
-		if !ok {
+// checkKey checks the key in a key/value pair.
+func checkKey(arg ast.Expr, pass *analysis.Pass, keyCheckEnabled, parametersCheckEnabled bool) {
+	if !keyCheckEnabled && !parametersCheckEnabled {
+		return
+	}
+
+	lit, ok := arg.(*ast.BasicLit)
+	if !ok {
+		pass.Report(analysis.Diagnostic{
+			Pos:     arg.Pos(),
+			Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", arg),
+		})
+		return
+	}
+
+	if lit.Kind != token.STRING {
+		pass.Report(analysis.Diagnostic{
+			Pos:     arg.Pos(),
+			Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", lit.Value),
+		})
+		return
+	}
+
+	switch {
+	case parametersCheckEnabled:
+		// This is the less strict check.
+		isASCII := utf8string.NewString(lit.Value).IsASCII()
+		if !isASCII {
 			pass.Report(analysis.Diagnostic{
-				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", arg),
+				Pos:     arg.Pos(),
+				Message: fmt.Sprintf("Key positional arguments %s are expected to be lowerCamelCase alphanumeric strings. Please remove any non-Latin characters.", lit.Value),
 			})
-			continue
 		}
-		if lit.Kind != token.STRING {
+	case keyCheckEnabled:
+		// This is the stricter check.
+		keyMatchRe := regexp.MustCompile(`(^[A-Z]{2,}|^[a-z])[[:alnum:]]*$`)
+		match := keyMatchRe.Match([]byte(strings.Trim(lit.Value, "\"")))
+		if !match {
 			pass.Report(analysis.Diagnostic{
-				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", lit.Value),
+				Pos:     arg.Pos(),
+				Message: fmt.Sprintf("Key positional arguments %s are expected to be alphanumeric and start with either one lowercase or two uppercase letters. Please refer to https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments.", lit.Value),
 			})
-			continue
 		}
-		switch {
-		case parametersCheckEnabled:
-			// This is the less strict check.
-			isASCII := utf8string.NewString(lit.Value).IsASCII()
-			if !isASCII {
+	}
+}
+
+// checkValue checks the value in a key/value pair.
+func checkValue(arg ast.Expr, pass *analysis.Pass, valueCheckEnabled bool) {
+	if !valueCheckEnabled {
+		return
+	}
+
+	// Check the type.
+	if typeAndValue, ok := pass.TypesInfo.Types[arg]; ok {
+		if obj, index, _ := types.LookupFieldOrMethod(typeAndValue.Type, typeAndValue.Addressable(), nil /* package */, "String"); obj != nil {
+			if function, ok := obj.(*types.Func); ok && isFmtString(function) && len(index) > 1 && !isWrapperStruct(typeAndValue.Type) {
 				pass.Report(analysis.Diagnostic{
-					Pos:     fun.Pos(),
-					Message: fmt.Sprintf("Key positional arguments %s are expected to be lowerCamelCase alphanumeric strings. Please remove any non-Latin characters.", lit.Value),
+					Pos:     arg.Pos(),
+					Message: fmt.Sprintf("The type %s inherits %s as implementation of fmt.Stringer, which covers only a subset of the value. Implement String() for the type or wrap it with TODO.", typeAndValue.Type.String(), function.FullName()), // TODO: https://github.com/kubernetes/kubernetes/pull/116952
 				})
-				continue
-			}
-		case keyCheckEnabled:
-			// This is the stricter check.
-			keyMatchRe := regexp.MustCompile(`(^[A-Z]{2,}|^[a-z])[[:alnum:]]*$`)
-			match := keyMatchRe.Match([]byte(strings.Trim(lit.Value, "\"")))
-			if !match {
-				pass.Report(analysis.Diagnostic{
-					Pos:     fun.Pos(),
-					Message: fmt.Sprintf("Key positional arguments %s are expected to be alphanumeric and start with either one lowercase or two uppercase letters. Please refer to https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments.", lit.Value),
-				})
-				continue
 			}
 		}
 	}
+}
+
+// isFmtString checks whether the function has the "func() string" signature.
+func isFmtString(function *types.Func) bool {
+	signature, ok := function.Type().(*types.Signature)
+	if !ok {
+		return false
+	}
+	params := signature.Params()
+	if params != nil && params.Len() != 0 {
+		return false
+	}
+	results := signature.Results()
+	if results == nil || results.Len() != 1 {
+		return false
+	}
+	result := results.At(0)
+	basic, ok := result.Type().(*types.Basic)
+	if !ok {
+		return false
+	}
+	if basic.Kind() != types.String {
+		return false
+	}
+	return true
+}
+
+// isWrapperStruct returns true for types that are a struct with a single field
+// or a pointer to one, like for example
+// https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Time.
+func isWrapperStruct(t types.Type) bool {
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = ptr.Elem()
+	}
+	if named, ok := t.(*types.Named); ok {
+		t = named.Underlying()
+	}
+	if strct, ok := t.(*types.Struct); ok {
+		return strct.NumFields() == 1
+	}
+
+	return false
 }
