@@ -145,6 +145,8 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 		fName := selExpr.Sel.Name
 
 		filename := pass.Pkg.Path() + "/" + path.Base(pass.Fset.Position(fexpr.Pos()).Filename)
+		keyCheckEnabled := c.isEnabled(keyCheck, filename)
+		parametersCheckEnabled := c.isEnabled(parametersCheck, filename)
 
 		// Now we need to determine whether it is coming from klog.
 		if isKlog(selExpr.X, pass) {
@@ -176,50 +178,37 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 				return
 			}
 
-			if c.isEnabled(parametersCheck, filename) {
+			if keyCheckEnabled || parametersCheckEnabled {
 				// if format specifier is used, check for arg length will most probably fail
 				// so check for format specifier first and skip if found
-				if checkForFormatSpecifier(fexpr, pass) {
+				if parametersCheckEnabled && checkForFormatSpecifier(fexpr, pass) {
 					return
 				}
-				if fName == "InfoS" {
-					isKeysValid(args[1:], fun, pass, fName)
-				} else if fName == "ErrorS" {
-					isKeysValid(args[2:], fun, pass, fName)
-				}
-
-				// Also check structured calls.
-				if c.isEnabled(parametersCheck, filename) {
-					checkForFormatSpecifier(fexpr, pass)
+				switch fName {
+				case "InfoS":
+					kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
+				case "ErrorS":
+					kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
 				}
 			}
 			// verbosity Zero Check
 			if c.isEnabled(verbosityZeroCheck, filename) {
 				checkForVerbosityZero(fexpr, pass)
 			}
-			// key Check
-			if c.isEnabled(keyCheck, filename) {
+		} else if isGoLogger(selExpr.X, pass) {
+			if keyCheckEnabled || parametersCheckEnabled {
 				// if format specifier is used, check for arg length will most probably fail
 				// so check for format specifier first and skip if found
-				if checkFormatSpecifier(fexpr, pass) {
+				if parametersCheckEnabled && checkForFormatSpecifier(fexpr, pass) {
 					return
 				}
-				if fName == "InfoS" {
-					keysCheck(args[1:], fun, pass, fName)
-				} else if fName == "ErrorS" {
-					keysCheck(args[2:], fun, pass, fName)
-				}
-			}
-		} else if isGoLogger(selExpr.X, pass) {
-			if c.isEnabled(parametersCheck, filename) {
-				checkForFormatSpecifier(fexpr, pass)
 				switch fName {
 				case "WithValues":
-					isKeysValid(args, fun, pass, fName)
+					kvCheck(args, fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
 				case "Info":
-					isKeysValid(args[1:], fun, pass, fName)
+					kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
 				case "Error":
-					isKeysValid(args[2:], fun, pass, fName)
+					kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled)
 				}
 			}
 			if c.isEnabled(withHelpersCheck, filename) {
@@ -234,22 +223,6 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 			// verbosity Zero Check
 			if c.isEnabled(verbosityZeroCheck, filename) {
 				checkForVerbosityZero(fexpr, pass)
-			}
-			// key Check
-			if c.isEnabled(keyCheck, filename) {
-				// if format specifier is used, check for arg length will most probably fail
-				// so check for format specifier first and skip if found
-				if checkFormatSpecifier(fexpr, pass) {
-					return
-				}
-				switch fName {
-				case "WithValues":
-					keysCheck(args, fun, pass, fName)
-				case "Info":
-					keysCheck(args[1:], fun, pass, fName)
-				case "Error":
-					keysCheck(args[2:], fun, pass, fName)
-				}
 			}
 		} else if fName == "NewContext" &&
 			isPackage(selExpr.X, "github.com/go-logr/logr", pass) &&
@@ -393,45 +366,6 @@ func isContextualCall(fName string) bool {
 	}
 
 	return false
-}
-
-// isKeysValid check if all keys in keyAndValues is string type
-func isKeysValid(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName string) {
-	if len(keyValues)%2 != 0 {
-		pass.Report(analysis.Diagnostic{
-			Pos:     fun.Pos(),
-			Message: fmt.Sprintf("Additional arguments to %s should always be Key Value pairs. Please check if there is any key or value missing.", funName),
-		})
-		return
-	}
-
-	for index, arg := range keyValues {
-		if index%2 != 0 {
-			continue
-		}
-		lit, ok := arg.(*ast.BasicLit)
-		if !ok {
-			pass.Report(analysis.Diagnostic{
-				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", arg),
-			})
-			continue
-		}
-		if lit.Kind != token.STRING {
-			pass.Report(analysis.Diagnostic{
-				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments are expected to be inlined constant strings. Please replace %v provided with string value.", lit.Value),
-			})
-			continue
-		}
-		isASCII := utf8string.NewString(lit.Value).IsASCII()
-		if !isASCII {
-			pass.Report(analysis.Diagnostic{
-				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments %s are expected to be lowerCamelCase alphanumeric strings. Please remove any non-Latin characters.", lit.Value),
-			})
-		}
-	}
 }
 
 func checkForFormatSpecifier(expr *ast.CallExpr, pass *analysis.Pass) bool {
@@ -615,17 +549,9 @@ func isVerbosityZero(expr ast.Expr) bool {
 	return false
 }
 
-func checkFormatSpecifier(expr *ast.CallExpr, pass *analysis.Pass) bool {
-	if _, ok := expr.Fun.(*ast.SelectorExpr); ok {
-		if _, found := hasFormatSpecifier(expr.Args); found {
-			return true
-		}
-	}
-	return false
-}
-
-// keysCheck check if all keys in keyAndValues are valid keys according to the guidelines.
-func keysCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName string) {
+// kvCheck check if all keys in keyAndValues are valid keys according to the guidelines
+// and that the values can be formatted.
+func kvCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName string, keyCheckEnabled, parametersCheckEnabled bool) {
 	if len(keyValues)%2 != 0 {
 		pass.Report(analysis.Diagnostic{
 			Pos:     fun.Pos(),
@@ -636,6 +562,11 @@ func keysCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName 
 
 	for index, arg := range keyValues {
 		if index%2 != 0 {
+			continue
+		}
+
+		// Check keys?
+		if !keyCheckEnabled && !parametersCheckEnabled {
 			continue
 		}
 		lit, ok := arg.(*ast.BasicLit)
@@ -653,13 +584,28 @@ func keysCheck(keyValues []ast.Expr, fun ast.Expr, pass *analysis.Pass, funName 
 			})
 			continue
 		}
-		keyMatchRe := regexp.MustCompile(`(^[A-Z]{2,}|^[a-z])[[:alnum:]]*$`)
-		match := keyMatchRe.Match([]byte(strings.Trim(lit.Value, "\"")))
-		if !match {
-			pass.Report(analysis.Diagnostic{
-				Pos:     fun.Pos(),
-				Message: fmt.Sprintf("Key positional arguments %s are expected to be alphanumeric and start with either one lowercase or two uppercase letters. Please refer to https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments.", lit.Value),
-			})
+		switch {
+		case parametersCheckEnabled:
+			// This is the less strict check.
+			isASCII := utf8string.NewString(lit.Value).IsASCII()
+			if !isASCII {
+				pass.Report(analysis.Diagnostic{
+					Pos:     fun.Pos(),
+					Message: fmt.Sprintf("Key positional arguments %s are expected to be lowerCamelCase alphanumeric strings. Please remove any non-Latin characters.", lit.Value),
+				})
+				continue
+			}
+		case keyCheckEnabled:
+			// This is the stricter check.
+			keyMatchRe := regexp.MustCompile(`(^[A-Z]{2,}|^[a-z])[[:alnum:]]*$`)
+			match := keyMatchRe.Match([]byte(strings.Trim(lit.Value, "\"")))
+			if !match {
+				pass.Report(analysis.Diagnostic{
+					Pos:     fun.Pos(),
+					Message: fmt.Sprintf("Key positional arguments %s are expected to be alphanumeric and start with either one lowercase or two uppercase letters. Please refer to https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments.", lit.Value),
+				})
+				continue
+			}
 		}
 	}
 }
