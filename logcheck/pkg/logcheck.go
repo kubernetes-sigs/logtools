@@ -598,10 +598,7 @@ func isVerbosityZero(expr ast.Expr) bool {
 	}
 
 	if lit, ok := subCallExpr.Args[0].(*ast.BasicLit); ok {
-		if lit.Value == "0" {
-			return true
-		}
-		return false
+		return lit.Value == "0"
 	}
 
 	// When Constants of value is defined in different files, the id.Obj will be nil, we should filter this condition.
