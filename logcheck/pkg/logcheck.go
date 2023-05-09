@@ -370,6 +370,7 @@ func isContextualCall(fName string) bool {
 		"EnableContextualLogging",
 		"FlushAndExit",
 		"FlushLogger",
+		"Format",
 		"FromContext",
 		"InitFlags",
 		"KObj",
