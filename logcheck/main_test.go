@@ -143,6 +143,13 @@ func TestAnalyzer(t *testing.T) {
 			},
 			testPackage: "allowBadkeysLogs",
 		},
+		{
+			name: "Detect incomplete fmt.Stringer",
+			enabled: map[string]string{
+				"value": "true",
+			},
+			testPackage: "stringer",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
