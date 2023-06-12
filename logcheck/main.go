@@ -23,5 +23,6 @@ import (
 )
 
 func main() {
-	singlechecker.Main(pkg.Analyser())
+	analyzer, _ := pkg.Analyser()
+	singlechecker.Main(analyzer)
 }
