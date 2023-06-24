@@ -21,6 +21,7 @@ limitations under the License.
 package parameters
 
 import (
+	"context"
 	"fmt"
 
 	klog "k8s.io/klog/v2"
@@ -52,4 +53,15 @@ func parameterCalls() {
 	klog.InfoS("hello", 1, 2) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
 	klog.ErrorS(nil, "hello", "1", 2)
 	klog.ErrorS(nil, "hello", 1, 2) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
+
+	// variadic input to klog.Info*, klog.Error*, klog.LoggerWithValues functions
+	kvs := []interface{}{"key1", "value1"}
+	klog.InfoS("foo message", kvs) // want `Additional arguments to InfoS should always be Key Value pairs. Please check if there is any key or value missing.`
+	klog.ErrorS(nil, "foo error message", kvs...)
+	klog.Info(kvs...)
+	klog.Error(kvs...)
+
+	logger := klog.FromContext(context.Background())
+	klog.LoggerWithValues(logger, kvs...)
+	klog.LoggerWithValues(logger, kvs) // want `Additional arguments to LoggerWithValues should always be Key Value pairs. Please check if there is any key or value missing.`
 }
