@@ -119,7 +119,7 @@ func run(pass *analysis.Pass, c *config) (interface{}, error) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.CallExpr:
-				// We are intrested in function calls, as we want to detect klog.* calls
+				// We are interested in function calls, as we want to detect klog.* calls
 				// passing all function calls to checkForFunctionExpr
 				checkForFunctionExpr(n, pass, c)
 			case *ast.FuncType:
@@ -182,17 +182,21 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 				return
 			}
 
-			if keyCheckEnabled || parametersCheckEnabled || valueCheckEnabled {
-				// if format specifier is used, check for arg length will most probably fail
-				// so check for format specifier first and skip if found
-				if parametersCheckEnabled && checkForFormatSpecifier(fexpr, pass) {
-					return
-				}
-				switch fName {
-				case "InfoS":
-					kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
-				case "ErrorS":
-					kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
+			// variadic input is a valid input to klog.Error*, klog.Info*, logr.Logger.Info and logr.Logger.Error
+			// functions. Hence checking the parameters for variadic input argument is excluded.
+			if !fexpr.Ellipsis.IsValid() {
+				if keyCheckEnabled || parametersCheckEnabled || valueCheckEnabled {
+					// if format specifier is used, check for arg length will most probably fail
+					// so check for format specifier first and skip if found
+					if parametersCheckEnabled && checkForFormatSpecifier(fexpr, pass) {
+						return
+					}
+					switch fName {
+					case "InfoS", "LoggerWithValues":
+						kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
+					case "ErrorS":
+						kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
+					}
 				}
 			}
 			// verbosity Zero Check
@@ -200,19 +204,21 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
 				checkForVerbosityZero(fexpr, pass)
 			}
 		} else if isGoLogger(selExpr.X, pass) {
-			if keyCheckEnabled || parametersCheckEnabled || valueCheckEnabled {
-				// if format specifier is used, check for arg length will most probably fail
-				// so check for format specifier first and skip if found
-				if parametersCheckEnabled && checkForFormatSpecifier(fexpr, pass) {
-					return
-				}
-				switch fName {
-				case "WithValues":
-					kvCheck(args, fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
-				case "Info":
-					kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
-				case "Error":
-					kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
+			if !fexpr.Ellipsis.IsValid() {
+				if keyCheckEnabled || parametersCheckEnabled || valueCheckEnabled {
+					// if format specifier is used, check for arg length will most probably fail
+					// so check for format specifier first and skip if found
+					if parametersCheckEnabled && checkForFormatSpecifier(fexpr, pass) {
+						return
+					}
+					switch fName {
+					case "WithValues":
+						kvCheck(args, fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
+					case "Info":
+						kvCheck(args[1:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
+					case "Error":
+						kvCheck(args[2:], fun, pass, fName, keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled)
+					}
 				}
 			}
 			if c.isEnabled(withHelpersCheck, filename) {
