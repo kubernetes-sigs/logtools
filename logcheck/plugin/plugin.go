@@ -19,6 +19,7 @@ limitations under the License.
 package main
 
 import (
+	"github.com/mitchellh/mapstructure"
 	"golang.org/x/tools/go/analysis"
 	"sigs.k8s.io/logtools/logcheck/pkg"
 )
@@ -33,3 +34,26 @@ func (*analyzerPlugin) GetAnalyzers() []*analysis.Analyzer {
 
 // AnalyzerPlugin is the entry point for golangci-lint.
 var AnalyzerPlugin analyzerPlugin
+
+// Settings is the value struct passed by golangci-lint.
+type Settings struct {
+	Config string
+}
+
+// New is the entry point for golangci-lint, which takes priority over AnalyzerPlugin.
+func New(conf interface{}) ([]*analysis.Analyzer, error) {
+	a := pkg.Analyser()
+
+	settings := Settings{}
+	if err := mapstructure.Decode(conf, &settings); err != nil {
+		return nil, err
+	}
+
+	if settings.Config != "" {
+		if err := a.Flags.Set("config", settings.Config); err != nil {
+			return nil, err
+		}
+	}
+
+	return []*analysis.Analyzer{a}, nil
+}
