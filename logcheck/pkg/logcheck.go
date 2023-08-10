@@ -17,6 +17,7 @@ limitations under the License.
 package pkg
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -45,18 +46,31 @@ const (
 
 type checks map[string]*bool
 
-type config struct {
+type Config struct {
 	enabled       checks
 	fileOverrides RegexpFilter
 }
 
-func (c config) isEnabled(check string, filename string) bool {
+func (c Config) isEnabled(check string, filename string) bool {
 	return c.fileOverrides.Enabled(check, *c.enabled[check], filename)
 }
 
+func (c *Config) SetEnabled(check string, enabled bool) error {
+	_, ok := c.enabled[check]
+	if !ok {
+		return fmt.Errorf("unsupported check %q", check)
+	}
+	*c.enabled[check] = enabled
+	return nil
+}
+
+func (c *Config) ParseConfig(configContent string) error {
+	return c.fileOverrides.Parse(bytes.NewBufferString(configContent), "<buffer>")
+}
+
 // Analyser creates a new logcheck analyser.
-func Analyser() *analysis.Analyzer {
-	c := config{
+func Analyser() (*analysis.Analyzer, *Config) {
+	c := Config{
 		enabled: checks{
 			structuredCheck:    new(bool),
 			parametersCheck:    new(bool),
@@ -72,7 +86,7 @@ func Analyser() *analysis.Analyzer {
 	for key := range c.enabled {
 		c.fileOverrides.validChecks[key] = true
 	}
-	logcheckFlags := flag.NewFlagSet("", flag.ExitOnError)
+	var logcheckFlags flag.FlagSet
 	prefix := "check-"
 	logcheckFlags.BoolVar(c.enabled[structuredCheck], prefix+structuredCheck, true, `When true, logcheck will warn about calls to unstructured
 klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
@@ -110,11 +124,11 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 		Run: func(pass *analysis.Pass) (interface{}, error) {
 			return run(pass, &c)
 		},
-		Flags: *logcheckFlags,
-	}
+		Flags: logcheckFlags,
+	}, &c
 }
 
-func run(pass *analysis.Pass, c *config) (interface{}, error) {
+func run(pass *analysis.Pass, c *Config) (interface{}, error) {
 	for _, file := range pass.Files {
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch n := n.(type) {
@@ -135,7 +149,7 @@ func run(pass *analysis.Pass, c *config) (interface{}, error) {
 }
 
 // checkForFunctionExpr checks for unstructured logging function, prints error if found any.
-func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *config) {
+func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *Config) {
 	fun := fexpr.Fun
 	args := fexpr.Args
 
@@ -420,7 +434,7 @@ func hasFormatSpecifier(fArgs []ast.Expr) (string, bool) {
 // context and a logger. That is problematic because it leads to ambiguity:
 // does the context already contain the logger? That matters when passing it on
 // without the logger.
-func checkForContextAndLogger(n ast.Node, params *ast.FieldList, pass *analysis.Pass, c *config) {
+func checkForContextAndLogger(n ast.Node, params *ast.FieldList, pass *analysis.Pass, c *Config) {
 	var haveLogger, haveContext bool
 
 	for _, param := range params.List {
@@ -451,7 +465,7 @@ func checkForContextAndLogger(n ast.Node, params *ast.FieldList, pass *analysis.
 
 // checkForIfEnabled detects `if klog.V(..).Enabled() { ...` and `if
 // logger.V(...).Enabled()` and suggests capturing the result of V.
-func checkForIfEnabled(i *ast.IfStmt, pass *analysis.Pass, c *config) {
+func checkForIfEnabled(i *ast.IfStmt, pass *analysis.Pass, c *Config) {
 	// if i.Init == nil {
 	// A more complex if statement, let's assume it's okay.
 	// return

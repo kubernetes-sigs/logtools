@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -50,7 +51,10 @@ func (f *RegexpFilter) Set(filename string) error {
 		return err
 	}
 	defer file.Close()
+	return f.Parse(file, filename)
+}
 
+func (f *RegexpFilter) Parse(file io.Reader, filename string) error {
 	// Reset before parsing.
 	f.filename = filename
 	f.lines = nil

@@ -153,7 +153,7 @@ func TestAnalyzer(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			analyzer := pkg.Analyser()
+			analyzer, _ := pkg.Analyser()
 			set := func(flag, value string) {
 				if value != "" {
 					if err := analyzer.Flags.Set(flag, value); err != nil {
