@@ -22,6 +22,9 @@ limitations under the License.
 package onlyallowcontextual
 
 import (
+	"context"
+
+	"k8s.io/apimachinery/pkg/util/runtime"
 	klog "k8s.io/klog/v2"
 )
 
@@ -32,4 +35,12 @@ func doNotAlllowKlog() {
 
 	klog.KObjs(nil)                                // want `Detected usage of deprecated helper "KObjs". Please switch to "KObjSlice" instead.`
 	klog.InfoS("test log", "key", klog.KObjs(nil)) // want `function "InfoS" should not be used, convert to contextual logging` `Detected usage of deprecated helper "KObjs". Please switch to "KObjSlice" instead.`
+}
+
+func doNotAllNonContext(ctx context.Context) {
+	runtime.HandleError(nil) // want `Use HandleErrorWithContext instead in code which supports contextual logging.`
+	runtime.HandleErrorWithContext(ctx, nil)
+	var handler runtime.Handler
+	handler.HandleError(nil) // want `Use HandleErrorWithContext instead in code which supports contextual logging.`
+	handler.HandleErrorWithContext(ctx, nil)
 }
