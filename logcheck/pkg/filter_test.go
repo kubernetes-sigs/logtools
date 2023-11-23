@@ -17,7 +17,7 @@ limitations under the License.
 package pkg
 
 import (
-	"io/ioutil"
+	"os"
 	"path"
 	"testing"
 )
@@ -25,7 +25,7 @@ import (
 func TestMatch(t *testing.T) {
 	temp := t.TempDir()
 	filename := path.Join(temp, "expressions")
-	if err := ioutil.WriteFile(filename, []byte(`# Example file
+	if err := os.WriteFile(filename, []byte(`# Example file
 structured hello
 +structured a.c
 -structured adc
@@ -133,7 +133,7 @@ parameters`,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := ioutil.WriteFile(filename, []byte(tc.content), 0666); err != nil {
+			if err := os.WriteFile(filename, []byte(tc.content), 0666); err != nil {
 				t.Fatalf("writing file: %v", err)
 			}
 
