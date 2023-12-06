@@ -56,6 +56,22 @@ through that.
 klog calls that are needed to manage contextual logging, for example
 `klog.Background`, are still allowed.
 
+Which of the klog functions are allowed is compiled into the logcheck binary.
+For functions or methods defined elsewhere, a special `//logcheck:context` can
+be added to trigger a warning about usage of such an API when contextual
+checking is enabled. Here is an example:
+
+    //logcheck:context // Foo should not be used in code which supports contextual logging.
+    func Foo() { ... }
+
+The additional explanation is optional. The default is the text above. It is recommended
+to mention what should be used instead, for example like this:
+
+    //logcheck:context // FooWithContext should be used instead of Foo in code which supports contextual logging.
+    func Foo() { ... }
+    
+    func FooWithContext(ctx context.Context) { .... }
+
 ## parameters (enabled by default)
 
 This ensures that if certain logging functions are allowed and are used, those

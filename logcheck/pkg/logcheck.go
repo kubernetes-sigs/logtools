@@ -124,9 +124,19 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 		Run: func(pass *analysis.Pass) (interface{}, error) {
 			return run(pass, &c)
 		},
-		Flags: logcheckFlags,
+		Flags:     logcheckFlags,
+		FactTypes: []analysis.Fact{new(warnContextual)},
 	}, &c
 }
+
+// warnContextual is a fact that is set for methods or functions which have the
+// `logcheck:context // <comment>` comment. The value stored here is that
+// comment.
+type warnContextual string
+
+func (w warnContextual) AFact() {}
+
+func (w warnContextual) String() string { return string(w) }
 
 func run(pass *analysis.Pass, c *Config) (interface{}, error) {
 	for _, file := range pass.Files {
@@ -140,6 +150,14 @@ func run(pass *analysis.Pass, c *Config) (interface{}, error) {
 				checkForContextAndLogger(n, n.Params, pass, c)
 			case *ast.IfStmt:
 				checkForIfEnabled(n, pass, c)
+			case *ast.FuncDecl:
+				checkForComments(pass.TypesInfo.ObjectOf(n.Name), n.Doc, pass)
+			case *ast.InterfaceType:
+				for _, method := range n.Methods.List {
+					for _, name := range method.Names {
+						checkForComments(pass.TypesInfo.ObjectOf(name), method.Doc, pass)
+					}
+				}
 			}
 
 			return true
@@ -152,6 +170,22 @@ func run(pass *analysis.Pass, c *Config) (interface{}, error) {
 func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *Config) {
 	fun := fexpr.Fun
 	args := fexpr.Args
+	filename := pass.Pkg.Path() + "/" + path.Base(pass.Fset.Position(fexpr.Pos()).Filename)
+	contextualCheckEnabled := c.isEnabled(contextualCheck, filename)
+
+	// Some function that is banned for contextual logging through comment?
+	if contextualCheckEnabled {
+		if ident, ok := fun.(*ast.Ident); ok {
+			object := pass.TypesInfo.ObjectOf(ident)
+			var why warnContextual
+			if pass.ImportObjectFact(object, &why) {
+				pass.Report(analysis.Diagnostic{
+					Pos:     fun.Pos(),
+					Message: string(why),
+				})
+			}
+		}
+	}
 
 	/* we are extracting external package function calls e.g. klog.Infof fmt.Printf
 	   and eliminating calls like setLocalHost()
@@ -161,10 +195,21 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *Config) {
 		// extracting function Name like Infof
 		fName := selExpr.Sel.Name
 
-		filename := pass.Pkg.Path() + "/" + path.Base(pass.Fset.Position(fexpr.Pos()).Filename)
 		valueCheckEnabled := c.isEnabled(valueCheck, filename)
 		keyCheckEnabled := c.isEnabled(keyCheck, filename)
 		parametersCheckEnabled := c.isEnabled(parametersCheck, filename)
+
+		// Some method that is banned for contextual logging through comment?
+		if contextualCheckEnabled {
+			object := pass.TypesInfo.ObjectOf(selExpr.Sel)
+			var why warnContextual
+			if pass.ImportObjectFact(object, &why) {
+				pass.Report(analysis.Diagnostic{
+					Pos:     selExpr.Sel.Pos(),
+					Message: string(why),
+				})
+			}
+		}
 
 		// Now we need to determine whether it is coming from klog.
 		if isKlog(selExpr.X, pass) {
@@ -702,3 +747,41 @@ func isWrapperStruct(t types.Type) bool {
 
 	return false
 }
+
+func checkForComments(object types.Object, doc *ast.CommentGroup, pass *analysis.Pass) {
+	if object == nil || doc == nil {
+		return
+	}
+
+	for _, comment := range doc.List {
+		text := comment.Text
+		text, found := strings.CutPrefix(text, logcheckPrefix)
+		if !found {
+			continue
+		}
+		text, found = strings.CutPrefix(text, contextKeyword)
+		if !found {
+			pass.Report(analysis.Diagnostic{
+				Pos:     comment.Pos(),
+				Message: "unknown logcheck keyword in comment",
+			})
+			continue
+		}
+		text = strings.TrimSpace(text)
+		why := warnContextual(fmt.Sprintf("%s should not be used in code which supports contextual logging.", object.Name()))
+		text, found = strings.CutPrefix(text, commentSep)
+		if found {
+			text = strings.TrimSpace(text)
+			if len(text) > 0 {
+				why = warnContextual(text)
+			}
+		}
+		pass.ExportObjectFact(object, &why)
+	}
+}
+
+const (
+	logcheckPrefix = "//logcheck:"
+	contextKeyword = "context"
+	commentSep     = "//"
+)

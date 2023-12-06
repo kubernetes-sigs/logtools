@@ -150,6 +150,13 @@ func TestAnalyzer(t *testing.T) {
 			},
 			testPackage: "stringer",
 		},
+		{
+			name: "logcheck facts",
+			enabled: map[string]string{
+				"contextual": "true",
+			},
+			testPackage: "k8s.io/apimachinery/pkg/util/runtime",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -22,6 +22,7 @@ limitations under the License.
 package allowUnstructuredLogs
 
 import (
+	"k8s.io/apimachinery/pkg/util/runtime"
 	klog "k8s.io/klog/v2"
 )
 
@@ -64,4 +65,5 @@ func allowUnstructuredLogs() {
 	klog.ExitDepth(1, "test log")
 	klog.Exitln("test log")
 	klog.Exitf("test log")
+	runtime.HandleError(nil)
 }
