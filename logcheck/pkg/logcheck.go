@@ -422,6 +422,7 @@ func isContextualCall(fName string) bool {
 		"LoggerWithName",
 		"LoggerWithValues",
 		"NewContext",
+		"SafePtr",
 		"SetLogger",
 		"SetLoggerWithOptions",
 		"StartFlushDaemon",
