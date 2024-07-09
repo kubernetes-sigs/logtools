@@ -84,6 +84,7 @@ Format strings are not allowed where plain strings are expected.
 ### structured logging calls
 
 Key/value parameters for logging calls are checked:
+
 - For each key there must be a value.
 - Keys must be constant strings.
 
@@ -113,3 +114,62 @@ This check flags check whether name arguments are valid keys according to the
 
 This checks detects the usage of deprecated `klog` helper functions such as `KObjs` and suggests
 a suitable alternative to replace them with.
+
+# Golangci-lint
+
+Logcheck needs to be built as a plugin to golangci-lint to be executed as a
+private linter. There are two plugin systems in golangci-lint, and the following
+instructions apply to the [Module Plugin System](https://golangci-lint.run/plugins/module-plugins/)
+(introduced since v1.57.0), which is a supported approach to run Logcheck in golangci-lint.
+
+One will have to build a custom golangci-lint binary by doing:
+
+(1) Create a `.custom-gcl.yml` file at the root of the repository if you have not
+done so, add the following content:
+
+```yaml
+version: v1.59.1
+plugins:
+    - module: "sigs.k8s.io/logtools"
+      import: "sigs.k8s.io/logtools/logcheck/gclplugin"
+      version: latest
+```
+
+(2) Add logcheck to the linter configuration file `.golangci.yaml`:
+
+```yaml
+# This config disables all other linters and only runs logcheck
+# Configure the linters as all other linters. This is mostly
+# for brevity.
+linters:
+  disable-all: true
+  enable:
+    - logcheck
+
+linters-settings:
+  custom:
+    logcheck:
+      type: "module"
+      description: structured logging checker
+      original-url: sigs.k8s.io/logtools/logcheck
+      settings:
+        check:
+          contextual: true
+        config: |
+          structured .*
+          contextual .*
+
+```
+
+(3) Build a custom golangci-lint binary with logcheck included:
+
+```sh
+golangci-lint custom
+```
+
+(4) Run the custom binary instead of golangci-lint:
+
+```sh
+# Arguments are the same as `golangci-lint`.
+./custom-gcl run ./...
+```
