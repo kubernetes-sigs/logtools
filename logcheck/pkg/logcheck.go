@@ -34,14 +34,15 @@ import (
 )
 
 const (
-	structuredCheck    = "structured"
-	parametersCheck    = "parameters"
-	contextualCheck    = "contextual"
-	withHelpersCheck   = "with-helpers"
-	verbosityZeroCheck = "verbosity-zero"
-	keyCheck           = "key"
-	valueCheck         = "value"
-	deprecationsCheck  = "deprecations"
+	structuredCheck     = "structured"
+	parametersCheck     = "parameters"
+	contextualCheck     = "contextual"
+	withHelpersCheck    = "with-helpers"
+	verbosityZeroCheck  = "verbosity-zero"
+	verbosityErrorCheck = "verbosity-error"
+	keyCheck            = "key"
+	valueCheck          = "value"
+	deprecationsCheck   = "deprecations"
 )
 
 type checks map[string]*bool
@@ -72,14 +73,15 @@ func (c *Config) ParseConfig(configContent string) error {
 func Analyser() (*analysis.Analyzer, *Config) {
 	c := Config{
 		enabled: checks{
-			structuredCheck:    new(bool),
-			parametersCheck:    new(bool),
-			contextualCheck:    new(bool),
-			withHelpersCheck:   new(bool),
-			verbosityZeroCheck: new(bool),
-			keyCheck:           new(bool),
-			valueCheck:         new(bool),
-			deprecationsCheck:  new(bool),
+			structuredCheck:     new(bool),
+			parametersCheck:     new(bool),
+			contextualCheck:     new(bool),
+			withHelpersCheck:    new(bool),
+			verbosityZeroCheck:  new(bool),
+			verbosityErrorCheck: new(bool),
+			keyCheck:            new(bool),
+			valueCheck:          new(bool),
+			deprecationsCheck:   new(bool),
 		},
 	}
 	c.fileOverrides.validChecks = map[string]bool{}
@@ -94,6 +96,7 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[contextualCheck], prefix+contextualCheck, false, `When true, logcheck will only allow log calls for contextual logging (retrieving a Logger from klog or the context and logging through that) and warn about all others.`)
 	logcheckFlags.BoolVar(c.enabled[withHelpersCheck], prefix+withHelpersCheck, false, `When true, logcheck will warn about direct calls to WithName, WithValues and NewContext.`)
 	logcheckFlags.BoolVar(c.enabled[verbosityZeroCheck], prefix+verbosityZeroCheck, true, `When true, logcheck will check whether the parameter for V() is 0.`)
+	logcheckFlags.BoolVar(c.enabled[verbosityErrorCheck], prefix+verbosityErrorCheck, true, `When true, logcheck will check for V() in front of a logr Error call.`)
 	logcheckFlags.BoolVar(c.enabled[keyCheck], prefix+keyCheck, true, `When true, logcheck will check whether name arguments are valid keys according to the guidelines in (https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments).`)
 	logcheckFlags.BoolVar(c.enabled[valueCheck], prefix+valueCheck, false, `When true, logcheck will check for problematic values (for example, types that have an incomplete fmt.Stringer implementation).`)
 	logcheckFlags.BoolVar(c.enabled[deprecationsCheck], prefix+deprecationsCheck, true, `When true, logcheck will analyze the usage of deprecated Klog function calls.`)
@@ -292,6 +295,18 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *Config) {
 			// verbosity Zero Check
 			if c.isEnabled(verbosityZeroCheck, filename) {
 				checkForVerbosityZero(fexpr, pass)
+			}
+
+			if fName == "Error" && c.isEnabled(verbosityErrorCheck, filename) {
+				// Is X itself the result of a selector expression with V as method name?
+				if innerCallExpr, ok := selExpr.X.(*ast.CallExpr); ok {
+					if innerSelExpr, ok := innerCallExpr.Fun.(*ast.SelectorExpr); ok && innerSelExpr.Sel.Name == "V" {
+						pass.Report(analysis.Diagnostic{
+							Pos:     innerSelExpr.Sel.Pos(),
+							Message: `V().Error ignores the verbosity and always logs. Use only Error if that is desired, otherwise V().Info(..., "err", err).`,
+						})
+					}
+				}
 			}
 		} else if fName == "NewContext" &&
 			isPackage(selExpr.X, "github.com/go-logr/logr", pass) &&

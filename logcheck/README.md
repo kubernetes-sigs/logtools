@@ -105,6 +105,20 @@ runtime in klog.
 
 This check flags all invocation of `klog.V(0)` or any of it's equivalent as errors
 
+## verbosity-error (enabled by default)
+
+`logger.V(5).Error` for a `logr.Logger` instance is identical to `logger.Error`
+because `logger.V(5)` is just another `Logger` instance and `Error` bypasses
+all verbosity checks. This is different from `klog.V(5).ErrorS`, which does
+the verbosity check.
+
+If the call really is an `Error` log call, i.e. with "an admin must know about
+this" importance, then the preceding `V()` should be removed. If the semantic
+from klog is desired, then the corresponding go-logr call is
+`logger.V(5).Info`, with the error passed in a `"err", error` key/value
+pair - at least in Kubernetes. Other projects may have different naming
+conventions.
+
 ## key (enabled by default)
 
 This check flags check whether name arguments are valid keys according to the
