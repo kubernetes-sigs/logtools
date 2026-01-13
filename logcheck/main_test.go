@@ -112,17 +112,19 @@ func TestAnalyzer(t *testing.T) {
 		{
 			name: "Do not allow Verbosity Zero logs",
 			enabled: map[string]string{
-				"structured": "false",
-				"key":        "false",
+				"structured":      "false",
+				"key":             "false",
+				"verbosity-error": "false",
 			},
 			testPackage: "doNotAllowVerbosityZeroLogs",
 		},
 		{
 			name: "Allow Verbosity Zero logs",
 			enabled: map[string]string{
-				"structured":     "false",
-				"verbosity-zero": "false",
-				"key":            "false",
+				"structured":      "false",
+				"verbosity-zero":  "false",
+				"verbosity-error": "false",
+				"key":             "false",
 			},
 			testPackage: "allowVerbosityZeroLogs",
 		},

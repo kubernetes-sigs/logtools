@@ -33,7 +33,7 @@ func logging() {
 	logger.WithValues("missing value")    // want `Additional arguments to WithValues should always be Key Value pairs. Please check if there is any key or value missing.`
 
 	logger.V(1).Info("hello", "missing value") // want `Additional arguments to Info should always be Key Value pairs. Please check if there is any key or value missing.`
-	logger.V(1).Error(nil, "hello", 1, 2)      // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
+	logger.V(1).Error(nil, "hello", 1, 2)      // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value` `V\(\).Error ignores the verbosity and always logs. Use only Error if that is desired, otherwise V\(\).Info\(..., "err", err\).`
 	logger.V(1).WithValues("missing value")    // want `Additional arguments to WithValues should always be Key Value pairs. Please check if there is any key or value missing.`
 
 	// variadic input to logger.Info, logger.Error, logger.WithValues functions
@@ -43,4 +43,5 @@ func logging() {
 	logger.WithValues(kvs...)
 	logger.WithValues(kvs)                      // want `Additional arguments to WithValues should always be Key Value pairs. Please check if there is any key or value missing.`
 	logger.Error(nil, "foo error message", kvs) // want `Additional arguments to Error should always be Key Value pairs. Please check if there is any key or value missing.`
+
 }
