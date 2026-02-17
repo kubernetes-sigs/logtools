@@ -1,6 +1,6 @@
 module sigs.k8s.io/logtools
 
-go 1.22.0
+go 1.23.0
 
 require (
 	github.com/golangci/plugin-module-register v0.1.1
