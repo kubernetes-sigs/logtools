@@ -24,10 +24,14 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/go-logr/logr"
 	klog "k8s.io/klog/v2"
 )
 
 func parameterCalls() {
+	logger := klog.FromContext(context.Background()) // Result is a type alias.
+	logger2 := logr.Logger(logger)                   // Not a type alias.
+
 	// format strings (incomplete list...)
 	klog.Infof("%d", 1)
 	klog.InfoS("%d", 1)  // want `logging function "InfoS" should not use format specifier "%d"`
@@ -45,14 +49,26 @@ func parameterCalls() {
 	klog.InfoS("hello", "value", fmt.Sprintf("%d", 1))
 
 	// odd number of parameters
-	klog.InfoS("hello", "key")       // want `Additional arguments to InfoS should always be Key Value pairs. Please check if there is any key or value missing.`
-	klog.ErrorS(nil, "hello", "key") // want `Additional arguments to ErrorS should always be Key Value pairs. Please check if there is any key or value missing.`
+	klog.InfoS("hello", "key")         // want `Additional arguments to InfoS should always be Key Value pairs. Please check if there is any key or value missing.`
+	klog.ErrorS(nil, "hello", "key")   // want `Additional arguments to ErrorS should always be Key Value pairs. Please check if there is any key or value missing.`
+	logger.Info("hello", "key")        // want `Additional arguments to Info should always be Key Value pairs. Please check if there is any key or value missing.`
+	logger.Error(nil, "hello", "key")  // want `Additional arguments to Error should always be Key Value pairs. Please check if there is any key or value missing.`
+	logger2.Info("hello", "key")       // want `Additional arguments to Info should always be Key Value pairs. Please check if there is any key or value missing.`
+	logger2.Error(nil, "hello", "key") // want `Additional arguments to Error should always be Key Value pairs. Please check if there is any key or value missing.`
 
 	// non-string keys
 	klog.InfoS("hello", "1", 2)
 	klog.InfoS("hello", 1, 2) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
 	klog.ErrorS(nil, "hello", "1", 2)
 	klog.ErrorS(nil, "hello", 1, 2) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
+	logger.Info("hello", "1", 2)
+	logger.Info("hello", 1, 2) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
+	logger.Error(nil, "hello", "1", 2)
+	logger.Error(nil, "hello", 1, 2) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
+	logger2.Info("hello", "1", 2)
+	logger2.Info("hello", 1, 2) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
+	logger2.Error(nil, "hello", "1", 2)
+	logger2.Error(nil, "hello", 1, 2) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
 
 	// variadic input to klog.Info*, klog.Error*, klog.LoggerWithValues functions
 	kvs := []interface{}{"key1", "value1"}
@@ -61,7 +77,15 @@ func parameterCalls() {
 	klog.Info(kvs...)
 	klog.Error(kvs...)
 
-	logger := klog.FromContext(context.Background())
+	logger.Info("foo message", kvs) // want `Additional arguments to Info should always be Key Value pairs. Please check if there is any key or value missing.`
+	logger.Error(nil, "foo error message", kvs...)
+	logger.Info("message", kvs...)
+	logger.Error(nil, "foo error message", kvs...)
+	logger2.Info("foo message", kvs) // want `Additional arguments to Info should always be Key Value pairs. Please check if there is any key or value missing.`
+	logger2.Error(nil, "foo error message", kvs...)
+	logger2.Info("message", kvs...)
+	logger2.Error(nil, "foo error message", kvs...)
+
 	klog.LoggerWithValues(logger, kvs...)
 	klog.LoggerWithValues(logger, kvs) // want `Additional arguments to LoggerWithValues should always be Key Value pairs. Please check if there is any key or value missing.`
 }
