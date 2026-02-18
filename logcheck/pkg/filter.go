@@ -50,7 +50,9 @@ func (f *RegexpFilter) Set(filename string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 	return f.Parse(file, filename)
 }
 

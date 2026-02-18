@@ -11,7 +11,9 @@ jobs:
     strategy:
       matrix:
         go-versions:
-        - "1.22"
+        - "1.23"
+        - "1.24"
+        - "1.25"
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3

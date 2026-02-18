@@ -324,7 +324,7 @@ func checkForFunctionExpr(fexpr *ast.CallExpr, pass *analysis.Pass, c *Config) {
 // the result of klog.V).
 func isKlogVerbose(expr ast.Expr, pass *analysis.Pass) bool {
 	if typeAndValue, ok := pass.TypesInfo.Types[expr]; ok {
-		switch t := typeAndValue.Type.(type) {
+		switch t := unwrapAlias(typeAndValue.Type).(type) {
 		case *types.Named:
 			if typeName := t.Obj(); typeName != nil {
 				if pkg := typeName.Pkg(); pkg != nil {
@@ -371,7 +371,7 @@ func isPackage(expr ast.Expr, packagePath string, pass *analysis.Pass) bool {
 // isGoLogger checks whether an expression is logr.Logger.
 func isGoLogger(expr ast.Expr, pass *analysis.Pass) bool {
 	if typeAndValue, ok := pass.TypesInfo.Types[expr]; ok {
-		switch t := typeAndValue.Type.(type) {
+		switch t := unwrapAlias(typeAndValue.Type).(type) {
 		case *types.Named:
 			if typeName := t.Obj(); typeName != nil {
 				if pkg := typeName.Pkg(); pkg != nil {
@@ -500,7 +500,7 @@ func checkForContextAndLogger(n ast.Node, params *ast.FieldList, pass *analysis.
 
 	for _, param := range params.List {
 		if typeAndValue, ok := pass.TypesInfo.Types[param.Type]; ok {
-			switch t := typeAndValue.Type.(type) {
+			switch t := unwrapAlias(typeAndValue.Type).(type) {
 			case *types.Named:
 				if typeName := t.Obj(); typeName != nil {
 					if pkg := typeName.Pkg(); pkg != nil {
@@ -793,6 +793,15 @@ func checkForComments(object types.Object, doc *ast.CommentGroup, pass *analysis
 			}
 		}
 		pass.ExportObjectFact(object, &why)
+	}
+}
+
+func unwrapAlias(t types.Type) types.Type {
+	switch t := t.(type) {
+	case *types.Alias:
+		return unwrapAlias(t.Rhs())
+	default:
+		return t
 	}
 }
 
