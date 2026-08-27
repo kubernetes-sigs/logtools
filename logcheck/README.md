@@ -129,6 +129,30 @@ This check flags check whether name arguments are valid keys according to the
 This checks detects the usage of deprecated `klog` helper functions such as `KObjs` and suggests
 a suitable alternative to replace them with.
 
+## logger-constructor (disabled by default)
+
+This check only has an effect when `contextual` is also enabled.
+
+Some functions or methods accept a configuration struct that has an optional
+`Logger *logr.Logger` field (or a field using an alias for that type, such as
+`klog.Logger`), for example
+[`workqueue.TypedDelayingQueueConfig`](https://pkg.go.dev/k8s.io/client-go/util/workqueue#TypedDelayingQueueConfig).
+When that field is left unset, contextual logging does not work as intended
+for whatever gets constructed from the configuration struct.
+
+This check flags call sites where such a struct is constructed without
+setting the `Logger` field. It is based on a best-effort, intraprocedural data
+flow analysis: the value passed for the configuration struct parameter must
+either be a composite literal or a local variable that was initialized with a
+composite literal (optionally followed by `variable.Logger = ...`
+assignments) earlier in the same function.
+
+Anything else cannot be analyzed with this approach. In particular, when a
+function itself receives such a configuration struct as a parameter and just
+passes it on to another function, whether the `Logger` field was set depends
+on the immediate caller, which cannot be determined locally. Such call sites
+are silently skipped instead of risking a false positive.
+
 # Golangci-lint
 
 Logcheck needs to be built as a plugin to golangci-lint to be executed as a

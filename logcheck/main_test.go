@@ -153,6 +153,22 @@ func TestAnalyzer(t *testing.T) {
 			testPackage: "stringer",
 		},
 		{
+			name: "Detect missing Logger field in config structs",
+			enabled: map[string]string{
+				"contextual":         "true",
+				"logger-constructor": "true",
+			},
+			testPackage: "missingLogger",
+		},
+		{
+			name: "Skip logger-constructor check when contextual is disabled",
+			enabled: map[string]string{
+				"contextual":         "false",
+				"logger-constructor": "true",
+			},
+			testPackage: "missingLoggerContextualDisabled",
+		},
+		{
 			name: "logcheck facts",
 			enabled: map[string]string{
 				"contextual": "true",
