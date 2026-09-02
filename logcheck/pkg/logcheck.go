@@ -43,6 +43,7 @@ const (
 	keyCheck            = "key"
 	valueCheck          = "value"
 	deprecationsCheck   = "deprecations"
+	loggerCheck         = "logger-constructor"
 )
 
 type checks map[string]*bool
@@ -82,6 +83,7 @@ func Analyser() (*analysis.Analyzer, *Config) {
 			keyCheck:            new(bool),
 			valueCheck:          new(bool),
 			deprecationsCheck:   new(bool),
+			loggerCheck:         new(bool),
 		},
 	}
 	c.fileOverrides.validChecks = map[string]bool{}
@@ -100,6 +102,7 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[keyCheck], prefix+keyCheck, true, `When true, logcheck will check whether name arguments are valid keys according to the guidelines in (https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments).`)
 	logcheckFlags.BoolVar(c.enabled[valueCheck], prefix+valueCheck, false, `When true, logcheck will check for problematic values (for example, types that have an incomplete fmt.Stringer implementation).`)
 	logcheckFlags.BoolVar(c.enabled[deprecationsCheck], prefix+deprecationsCheck, true, `When true, logcheck will analyze the usage of deprecated Klog function calls.`)
+	logcheckFlags.BoolVar(c.enabled[loggerCheck], prefix+loggerCheck, false, `When true and the "contextual" check is also enabled, logcheck will warn about call sites which construct a configuration struct with an optional "Logger *logr.Logger" (or klog.Logger) field without setting that field, based on a best-effort data flow analysis. Call sites where the configuration struct cannot be analyzed (for example, because it was received as a parameter) are silently skipped.`)
 	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
 
 	// Use env variables as defaults. This is necessary when used as plugin
@@ -143,12 +146,26 @@ func (w warnContextual) String() string { return string(w) }
 
 func run(pass *analysis.Pass, c *Config) (interface{}, error) {
 	for _, file := range pass.Files {
+		// ancestors tracks the current path from the file down to the node
+		// that is currently visited. It is needed by checkForMissingLogger to
+		// find the innermost enclosing function body of a call expression.
+		// ast.Inspect calls the visitor function once more with a nil node
+		// after it is done with the children of a node, which is used here to
+		// pop that node off again.
+		var ancestors []ast.Node
 		ast.Inspect(file, func(n ast.Node) bool {
+			if n == nil {
+				ancestors = ancestors[:len(ancestors)-1]
+				return true
+			}
+			ancestors = append(ancestors, n)
+
 			switch n := n.(type) {
 			case *ast.CallExpr:
 				// We are interested in function calls, as we want to detect klog.* calls
 				// passing all function calls to checkForFunctionExpr
 				checkForFunctionExpr(n, pass, c)
+				checkForMissingLogger(n, ancestors, pass, c)
 			case *ast.FuncType:
 				checkForContextAndLogger(n, n.Params, pass, c)
 			case *ast.IfStmt:
@@ -522,6 +539,259 @@ func checkForContextAndLogger(n ast.Node, params *ast.FieldList, pass *analysis.
 			Message: `A function should accept either a context or a logger, but not both. Having both makes calling the function harder because it must be defined whether the context must contain the logger and callers have to follow that.`,
 		})
 	}
+}
+
+// checkForMissingLogger implements the optional "logger-constructor" check. It looks for
+// calls to functions or methods which accept a configuration struct
+// containing an optional "Logger *logr.Logger" field (or the klog.Logger
+// alias for it) and checks whether the call site populates that field.
+//
+// This relies on a best-effort, intraprocedural data flow analysis: the
+// configuration struct value passed into the call must either be a composite
+// literal or a local variable which was initialized with a composite literal
+// (optionally followed by "variable.Logger = ..." assignments) earlier in the
+// same function. Anything else - in particular a configuration struct that
+// was received as a parameter of the enclosing function or returned by some
+// other call - cannot be analyzed locally, so such call sites are silently
+// skipped instead of risking a false positive.
+func checkForMissingLogger(call *ast.CallExpr, ancestors []ast.Node, pass *analysis.Pass, c *Config) {
+	filename := pass.Pkg.Path() + "/" + path.Base(pass.Fset.Position(call.Pos()).Filename)
+	if !c.isEnabled(loggerCheck, filename) || !c.isEnabled(contextualCheck, filename) {
+		return
+	}
+
+	sig, ok := pass.TypesInfo.TypeOf(call.Fun).(*types.Signature)
+	if !ok {
+		return
+	}
+
+	params := sig.Params()
+	for i := 0; i < params.Len() && i < len(call.Args); i++ {
+		// The struct with the optional logger is passed by value, so the
+		// variadic parameter (a slice) is never going to match.
+		if sig.Variadic() && i == params.Len()-1 {
+			continue
+		}
+		fieldIndex, ok := loggerFieldIndex(params.At(i).Type())
+		if !ok {
+			continue
+		}
+
+		body := enclosingFuncBody(ancestors)
+		lit, fieldAssigns, ok := resolveConfigLiteral(call.Args[i], body, call.Pos(), pass)
+		if !ok {
+			// Cannot be checked locally.
+			continue
+		}
+
+		loggerIsSet := compositeLitSetsLoggerField(lit, fieldIndex)
+		if set, ok := lastLoggerFieldAssignment(fieldAssigns); ok {
+			// A later "config.Logger = ..." assignment overrides whatever
+			// the composite literal did.
+			loggerIsSet = set
+		}
+		if loggerIsSet {
+			continue
+		}
+
+		pass.Report(analysis.Diagnostic{
+			Pos:     call.Args[i].Pos(),
+			End:     call.Args[i].End(),
+			Message: fmt.Sprintf("the Logger field of %s is not set, contextual logging will not work as expected unless a fallback logger is acceptable here", params.At(i).Type().String()),
+		})
+	}
+}
+
+// loggerFieldIndex returns the index of a directly declared "Logger" field
+// with type "*logr.Logger" (or an alias of it, like klog.Logger) in t, which
+// may be a struct or a pointer to one, possibly a generic instantiation.
+func loggerFieldIndex(t types.Type) (int, bool) {
+	t = unwrapAlias(t)
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = unwrapAlias(ptr.Elem())
+	}
+	named, ok := t.(*types.Named)
+	if !ok {
+		return 0, false
+	}
+	strct, ok := named.Underlying().(*types.Struct)
+	if !ok {
+		return 0, false
+	}
+	for i := 0; i < strct.NumFields(); i++ {
+		field := strct.Field(i)
+		if field.Name() == "Logger" && isLoggerPointerType(field.Type()) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// isLoggerPointerType returns true for "*logr.Logger" and aliases of it, like
+// "*klog.Logger".
+func isLoggerPointerType(t types.Type) bool {
+	ptr, ok := unwrapAlias(t).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	named, ok := unwrapAlias(ptr.Elem()).(*types.Named)
+	if !ok {
+		return false
+	}
+	typeName := named.Obj()
+	if typeName == nil {
+		return false
+	}
+	pkg := typeName.Pkg()
+	return pkg != nil && typeName.Name() == "Logger" && pkg.Path() == "github.com/go-logr/logr"
+}
+
+// enclosingFuncBody returns the body of the innermost function declaration or
+// function literal in ancestors, or nil if there is none.
+func enclosingFuncBody(ancestors []ast.Node) *ast.BlockStmt {
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		switch n := ancestors[i].(type) {
+		case *ast.FuncDecl:
+			return n.Body
+		case *ast.FuncLit:
+			return n.Body
+		}
+	}
+	return nil
+}
+
+// resolveConfigLiteral tries to determine the composite literal that was used
+// to construct the value of expr and any assignments to its fields that
+// happen afterwards, but still before pos, within body. It returns ok ==
+// false if expr isn't a composite literal itself and isn't a simple local
+// variable that can be traced back to one within the same function body,
+// meaning that the value cannot be analyzed with this best-effort approach.
+func resolveConfigLiteral(expr ast.Expr, body *ast.BlockStmt, pos token.Pos, pass *analysis.Pass) (*ast.CompositeLit, []*ast.AssignStmt, bool) {
+	expr = unwrapAddrAndParens(expr)
+	if lit, ok := expr.(*ast.CompositeLit); ok {
+		return lit, nil, true
+	}
+
+	ident, ok := expr.(*ast.Ident)
+	if !ok || body == nil {
+		return nil, nil, false
+	}
+	obj := pass.TypesInfo.ObjectOf(ident)
+	if obj == nil {
+		return nil, nil, false
+	}
+
+	var lit *ast.CompositeLit
+	var fieldAssigns []*ast.AssignStmt
+	ast.Inspect(body, func(n ast.Node) bool {
+		if n == nil || n.Pos() >= pos {
+			return false
+		}
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		if len(assign.Lhs) != len(assign.Rhs) {
+			// Not a simple 1:1 assignment (for example "a, b := f()"),
+			// too complex to analyze reliably.
+			return true
+		}
+		for i, lhs := range assign.Lhs {
+			switch lhs := lhs.(type) {
+			case *ast.Ident:
+				if pass.TypesInfo.ObjectOf(lhs) != obj {
+					continue
+				}
+				// (Re)assignment of the variable itself. Only a composite
+				// literal can be analyzed further, anything else (for
+				// example a function call) makes the value untraceable
+				// from here on.
+				if rl, ok := unwrapAddrAndParens(assign.Rhs[i]).(*ast.CompositeLit); ok {
+					lit = rl
+				} else {
+					lit = nil
+				}
+				fieldAssigns = nil
+			case *ast.SelectorExpr:
+				if selIdent, ok := lhs.X.(*ast.Ident); ok && pass.TypesInfo.ObjectOf(selIdent) == obj {
+					fieldAssigns = append(fieldAssigns, assign)
+				}
+			}
+		}
+		return true
+	})
+
+	if lit == nil {
+		return nil, nil, false
+	}
+	return lit, fieldAssigns, true
+}
+
+// unwrapAddrAndParens removes "&" and parentheses around expr.
+func unwrapAddrAndParens(expr ast.Expr) ast.Expr {
+	for {
+		switch e := expr.(type) {
+		case *ast.ParenExpr:
+			expr = e.X
+		case *ast.UnaryExpr:
+			if e.Op != token.AND {
+				return expr
+			}
+			expr = e.X
+		default:
+			return expr
+		}
+	}
+}
+
+// compositeLitSetsLoggerField returns true if the composite literal sets the
+// field at fieldIndex (the "Logger" field) to something other than nil,
+// either through a keyed or a positional element.
+func compositeLitSetsLoggerField(lit *ast.CompositeLit, fieldIndex int) bool {
+	keyed := false
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		keyed = true
+		if ident, ok := kv.Key.(*ast.Ident); ok && ident.Name == "Logger" {
+			return !isNilIdent(kv.Value)
+		}
+	}
+	if keyed {
+		// Fully keyed literal without a "Logger" key: not set.
+		return false
+	}
+	// Positional literal: Go requires that either all or none of the
+	// elements are keyed, so at this point all elements are positional.
+	if fieldIndex < len(lit.Elts) {
+		return !isNilIdent(lit.Elts[fieldIndex])
+	}
+	return false
+}
+
+// lastLoggerFieldAssignment returns whether the last assignment in
+// fieldAssigns which targets the "Logger" field sets it to something other
+// than nil. ok is false if none of the assignments target that field.
+func lastLoggerFieldAssignment(fieldAssigns []*ast.AssignStmt) (set bool, ok bool) {
+	for _, assign := range fieldAssigns {
+		for i, lhs := range assign.Lhs {
+			selExpr, selOK := lhs.(*ast.SelectorExpr)
+			if !selOK || selExpr.Sel.Name != "Logger" {
+				continue
+			}
+			set = !isNilIdent(assign.Rhs[i])
+			ok = true
+		}
+	}
+	return set, ok
+}
+
+// isNilIdent returns true if expr is the predeclared identifier "nil".
+func isNilIdent(expr ast.Expr) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == "nil"
 }
 
 // checkForIfEnabled detects `if klog.V(..).Enabled() { ...` and `if
