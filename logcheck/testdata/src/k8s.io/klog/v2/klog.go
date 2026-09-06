@@ -230,6 +230,11 @@ func KRef(namespace, name string) interface{} {
 	return nil
 }
 
+// SafePtr emulates klog.SafePtr
+func SafePtr[T any, P *T](p P) any {
+	return nil
+}
+
 func FromContext(ctx context.Context) Logger {
 	return Logger{}
 }
