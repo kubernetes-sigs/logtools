@@ -100,7 +100,7 @@ klog methods (Info, Infof, Error, Errorf, Warningf, etc).`)
 	logcheckFlags.BoolVar(c.enabled[verbosityZeroCheck], prefix+verbosityZeroCheck, true, `When true, logcheck will check whether the parameter for V() is 0.`)
 	logcheckFlags.BoolVar(c.enabled[verbosityErrorCheck], prefix+verbosityErrorCheck, true, `When true, logcheck will check for V() in front of a logr Error call.`)
 	logcheckFlags.BoolVar(c.enabled[keyCheck], prefix+keyCheck, true, `When true, logcheck will check whether name arguments are valid keys according to the guidelines in (https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/migration-to-structured-logging.md#name-arguments).`)
-	logcheckFlags.BoolVar(c.enabled[valueCheck], prefix+valueCheck, false, `When true, logcheck will check for problematic values (for example, types that have an incomplete fmt.Stringer implementation).`)
+	logcheckFlags.BoolVar(c.enabled[valueCheck], prefix+valueCheck, false, `When true, logcheck will check for problematic values (for example, types that have an incomplete fmt.Stringer implementation or pointers whose value type implements fmt.Stringer with a value receiver, which panics in String() for a nil pointer).`)
 	logcheckFlags.BoolVar(c.enabled[deprecationsCheck], prefix+deprecationsCheck, true, `When true, logcheck will analyze the usage of deprecated Klog function calls.`)
 	logcheckFlags.BoolVar(c.enabled[loggerCheck], prefix+loggerCheck, false, `When true and the "contextual" check is also enabled, logcheck will warn about call sites which construct a configuration struct with an optional "Logger *logr.Logger" (or klog.Logger) field without setting that field, based on a best-effort data flow analysis. Call sites where the configuration struct cannot be analyzed (for example, because it was received as a parameter) are silently skipped.`)
 	logcheckFlags.Var(&c.fileOverrides, "config", `A file which overrides the global settings for checks on a per-file basis via regular expressions.`)
@@ -980,12 +980,44 @@ func checkValue(arg ast.Expr, pass *analysis.Pass, valueCheckEnabled bool) {
 	}
 
 	// Check the type.
-	if typeAndValue, ok := pass.TypesInfo.Types[arg]; ok {
-		if obj, index, _ := types.LookupFieldOrMethod(typeAndValue.Type, typeAndValue.Addressable(), nil /* package */, "String"); obj != nil {
-			if function, ok := obj.(*types.Func); ok && isFmtString(function) && len(index) > 1 && !isWrapperStruct(typeAndValue.Type) {
+	typeAndValue, ok := pass.TypesInfo.Types[arg]
+	if !ok {
+		return
+	}
+	if obj, index, _ := types.LookupFieldOrMethod(typeAndValue.Type, typeAndValue.Addressable(), nil /* package */, "String"); obj != nil {
+		if function, ok := obj.(*types.Func); ok && isFmtString(function) && len(index) > 1 && !isWrapperStruct(typeAndValue.Type) {
+			pass.Report(analysis.Diagnostic{
+				Pos:     arg.Pos(),
+				Message: fmt.Sprintf("The type %s inherits %s as implementation of fmt.Stringer, which covers only a subset of the value. Implement String() for the type or wrap it with TODO.", typeAndValue.Type.String(), function.FullName()), // TODO: https://github.com/kubernetes/kubernetes/pull/116952
+			})
+		}
+	}
+
+	/* A pointer whose element type implements fmt.Stringer with a value
+	   receiver panics in String() when the pointer is nil: the promoted
+	   method must dereference the pointer to get its value receiver. klog
+	   recovers from that panic and logs it instead of the value.
+	*/
+	if unary, ok := arg.(*ast.UnaryExpr); ok && unary.Op == token.AND {
+		// Taking the address of a value never yields a nil pointer.
+		return
+	}
+	if ptr, ok := unwrapAlias(typeAndValue.Type).(*types.Pointer); ok {
+		elem := unwrapAlias(ptr.Elem())
+		switch elem.Underlying().(type) {
+		case *types.Pointer, *types.Interface:
+			// A pointer to a pointer or to an interface does not
+			// implement fmt.Stringer, so String() never gets called.
+			return
+		}
+		// Look up String in the method set of the element type: those are
+		// exactly the value receiver methods which get promoted to the
+		// pointer type via an implicit dereference.
+		if selection := types.NewMethodSet(elem).Lookup(nil /* package */, "String"); selection != nil {
+			if function, ok := selection.Obj().(*types.Func); ok && isFmtString(function) {
 				pass.Report(analysis.Diagnostic{
 					Pos:     arg.Pos(),
-					Message: fmt.Sprintf("The type %s inherits %s as implementation of fmt.Stringer, which covers only a subset of the value. Implement String() for the type or wrap it with TODO.", typeAndValue.Type.String(), function.FullName()), // TODO: https://github.com/kubernetes/kubernetes/pull/116952
+					Message: fmt.Sprintf("The type %s implements fmt.Stringer via the value receiver method %s. Calling String() panics for a nil pointer, which klog then logs instead of the value. Wrap the value with klog.SafePtr.", typeAndValue.Type.String(), function.FullName()),
 				})
 			}
 		}
