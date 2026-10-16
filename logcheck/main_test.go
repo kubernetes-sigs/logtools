@@ -186,6 +186,20 @@ func TestAnalyzer(t *testing.T) {
 			},
 			testPackage: "k8s.io/apimachinery/pkg/util/runtime",
 		},
+		{
+			name: "Detect log call wrappers",
+			enabled: map[string]string{
+				"structured": "false",
+			},
+			testPackage: "wrappers",
+		},
+		{
+			name: "Detect cross-package log call wrappers",
+			enabled: map[string]string{
+				"structured": "false",
+			},
+			testPackage: "wrappercaller",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
