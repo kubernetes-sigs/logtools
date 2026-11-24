@@ -147,16 +147,32 @@ func (w warnContextual) AFact() {}
 
 func (w warnContextual) String() string { return string(w) }
 
+// wrapperKind describes how a log call wrapper forwards its key-value pairs.
+type wrapperKind uint8
+
+const (
+	// wrapperVariadic: the pairs are the trailing variadic args, so
+	// args[KVArgIndex:] are the key-value pairs.
+	wrapperVariadic wrapperKind = iota
+	// wrapperSlice: the single arg at KVArgIndex is a []interface{} whose
+	// elements are the key-value pairs.
+	wrapperSlice
+)
+
 // logKVWrapper is a fact exported for functions or methods that forward
-// variadic key-value arguments to a structured logging call (klog.InfoS,
+// key-value arguments to a structured logging call (klog.InfoS,
 // logr.Logger.Info etc.)
 type logKVWrapper struct {
+	Kind       wrapperKind
 	KVArgIndex int
 }
 
 func (w logKVWrapper) AFact() {}
 
 func (w logKVWrapper) String() string {
+	if w.Kind == wrapperSlice {
+		return fmt.Sprintf("logKVWrapper slice at index %d", w.KVArgIndex)
+	}
 	return fmt.Sprintf("logKVWrapper at index %d", w.KVArgIndex)
 }
 
@@ -400,7 +416,7 @@ func checkForWrapperCall(fexpr *ast.CallExpr, pass *analysis.Pass, c *Config) {
 	}
 
 	args := fexpr.Args
-	if fact.KVArgIndex > len(args) {
+	if fact.KVArgIndex >= len(args) {
 		return
 	}
 
@@ -408,7 +424,16 @@ func checkForWrapperCall(fexpr *ast.CallExpr, pass *analysis.Pass, c *Config) {
 		return
 	}
 
-	kvCheck(args[fact.KVArgIndex:], fexpr.Fun, pass, obj.Name(), keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled, nilStringerCheckEnabled)
+	switch fact.Kind {
+	case wrapperVariadic:
+		kvCheck(args[fact.KVArgIndex:], fexpr.Fun, pass, obj.Name(), keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled, nilStringerCheckEnabled)
+	case wrapperSlice:
+		lit, ok := args[fact.KVArgIndex].(*ast.CompositeLit)
+		if !ok {
+			return
+		}
+		kvCheck(lit.Elts, fexpr.Fun, pass, obj.Name(), keyCheckEnabled, parametersCheckEnabled, valueCheckEnabled, nilStringerCheckEnabled)
+	}
 }
 
 // isKlogVerbose returns true if the type of the expression is klog.Verbose (=
@@ -1207,8 +1232,10 @@ func checkForComments(object types.Object, doc *ast.CommentGroup, pass *analysis
 		if !found {
 			continue
 		}
-		// //logcheck:wrapper is handled by the detectMarkedWrappers pre-pass.
-		if strings.TrimSpace(text) == wrapperKeyword {
+		// //logcheck:wrapper and //logcheck:wrapper(N) are handled by the
+		// detectMarkedWrappers pre-pass.
+		trimmed := strings.TrimSpace(text)
+		if trimmed == wrapperKeyword || strings.HasPrefix(trimmed, wrapperKeyword+"(") {
 			continue
 		}
 		text, found = strings.CutPrefix(text, contextKeyword)
@@ -1265,6 +1292,25 @@ func findVariadicKVParam(sig *types.Signature) int {
 	return params.Len() - 1
 }
 
+// sliceKVParamOK reports whether parameter idx of sig is a non-variadic
+// []interface{} (the form used by //logcheck:wrapper(N) wrappers).
+// please see: https://github.com/kubernetes-sigs/logtools/pull/37#discussion_r4105151846
+func sliceKVParamOK(sig *types.Signature, idx int) bool {
+	params := sig.Params()
+	if idx < 0 || idx >= params.Len() {
+		return false
+	}
+	if sig.Variadic() && idx == params.Len()-1 {
+		return false
+	}
+	slice, ok := unwrapAlias(params.At(idx).Type()).(*types.Slice)
+	if !ok {
+		return false
+	}
+	iface, ok := unwrapAlias(slice.Elem()).(*types.Interface)
+	return ok && iface.Empty()
+}
+
 /*
 	 detectMarkedWrappers scans all function and variable declarations for
 	 //logcheck:wrapper comments and exports logKVWrapper facts for them.
@@ -1286,7 +1332,8 @@ func detectMarkedWrappers(pass *analysis.Pass) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.FuncDecl:
-				if n.Doc == nil || !hasLogcheckMarker(n.Doc, wrapperKeyword) {
+				found, idx := parseWrapperMarker(n.Doc)
+				if !found {
 					return true
 				}
 				obj := pass.TypesInfo.ObjectOf(n.Name)
@@ -1297,12 +1344,12 @@ func detectMarkedWrappers(pass *analysis.Pass) {
 				if sig == nil {
 					return true
 				}
-				exportWrapperFact(pass, obj, sig, n.Pos(), n.Name.Name)
+				exportWrapperFact(pass, obj, sig, idx, n.Pos(), n.Name.Name)
 			case *ast.GenDecl:
 				if n.Tok != token.VAR {
 					return true
 				}
-				hasMarker := n.Doc != nil && hasLogcheckMarker(n.Doc, wrapperKeyword)
+				hasMarker, markerIdx := parseWrapperMarker(n.Doc)
 				for _, spec := range n.Specs {
 					vs, ok := spec.(*ast.ValueSpec)
 					if !ok {
@@ -1319,7 +1366,7 @@ func detectMarkedWrappers(pass *analysis.Pass) {
 							if sig == nil {
 								continue
 							}
-							exportWrapperFact(pass, obj, sig, n.Pos(), name.Name)
+							exportWrapperFact(pass, obj, sig, markerIdx, n.Pos(), name.Name)
 						} else if i < len(vs.Values) {
 							// No marker: auto-detect if the initializer
 							// is a known klog/logr structured log function.
@@ -1375,7 +1422,7 @@ func detectLogFuncAlias(pass *analysis.Pass, obj types.Object, init ast.Expr) {
 	if kvArgIndex < 0 {
 		return
 	}
-	fact := logKVWrapper{KVArgIndex: kvArgIndex}
+	fact := logKVWrapper{Kind: wrapperVariadic, KVArgIndex: kvArgIndex}
 	pass.ExportObjectFact(obj, &fact)
 }
 
@@ -1395,7 +1442,22 @@ func sigFromObject(obj types.Object) *types.Signature {
 
 // exportWrapperFact validates the signature and exports a logKVWrapper fact
 // for the given object.
-func exportWrapperFact(pass *analysis.Pass, obj types.Object, sig *types.Signature, pos token.Pos, name string) {
+func exportWrapperFact(pass *analysis.Pass, obj types.Object, sig *types.Signature, idx int, pos token.Pos, name string) {
+	if idx >= 0 {
+		// //logcheck:wrapper(N): the pairs are the elements of a []interface{}
+		// parameter at the given position.
+		if !sliceKVParamOK(sig, idx) {
+			pass.Report(analysis.Diagnostic{
+				Pos:     pos,
+				Message: fmt.Sprintf("%s is marked as //logcheck:wrapper(%d) but parameter %d is not a []interface{}", name, idx, idx),
+			})
+			return
+		}
+		fact := logKVWrapper{Kind: wrapperSlice, KVArgIndex: idx}
+		pass.ExportObjectFact(obj, &fact)
+		return
+	}
+
 	kvArgIndex := findVariadicKVParam(sig)
 	if kvArgIndex < 0 {
 		pass.Report(analysis.Diagnostic{
@@ -1404,22 +1466,36 @@ func exportWrapperFact(pass *analysis.Pass, obj types.Object, sig *types.Signatu
 		})
 		return
 	}
-	fact := logKVWrapper{KVArgIndex: kvArgIndex}
+	fact := logKVWrapper{Kind: wrapperVariadic, KVArgIndex: kvArgIndex}
 	pass.ExportObjectFact(obj, &fact)
 }
 
-func hasLogcheckMarker(doc *ast.CommentGroup, keyword string) bool {
+// parseWrapperMarker reports whether doc carries a //logcheck:wrapper marker
+// and, for the //logcheck:wrapper(N) form, the requested parameter index.
+// idx is -1 for the bare //logcheck:wrapper form.
+// please see: https://github.com/kubernetes-sigs/logtools/pull/37#discussion_r4105151846
+func parseWrapperMarker(doc *ast.CommentGroup) (found bool, idx int) {
+	if doc == nil {
+		return false, -1
+	}
 	for _, comment := range doc.List {
-		text := comment.Text
-		text, found := strings.CutPrefix(text, logcheckPrefix)
-		if !found {
+		text, ok := strings.CutPrefix(comment.Text, logcheckPrefix)
+		if !ok {
 			continue
 		}
-		if strings.TrimSpace(text) == keyword {
-			return true
+		text = strings.TrimSpace(text)
+		if text == wrapperKeyword {
+			return true, -1
+		}
+		if rest, ok := strings.CutPrefix(text, wrapperKeyword+"("); ok {
+			if inner, ok := strings.CutSuffix(rest, ")"); ok {
+				if v, err := strconv.Atoi(strings.TrimSpace(inner)); err == nil && v >= 0 {
+					return true, v
+				}
+			}
 		}
 	}
-	return false
+	return false, -1
 }
 
 const (

@@ -81,6 +81,23 @@ func notAWrapper(msg string, args ...interface{}) {
 	_ = args
 }
 
+// --- Slice-based wrappers (//logcheck:wrapper(N)) -----
+
+// logSlice forwards an explicit []interface{} of key-value pairs. The marker
+// index points at the slice parameter (position 1).
+//
+//logcheck:wrapper(1)
+func logSlice(msg string, kvs []interface{}) { // want logSlice:"logKVWrapper slice at index 1"
+	klog.InfoS(msg, kvs...)
+}
+
+// logSliceFirst keeps the slice in the leading position (index 0).
+//
+//logcheck:wrapper(0)
+func logSliceFirst(kvs []interface{}, msg string) { // want logSliceFirst:"logKVWrapper slice at index 0"
+	klog.InfoS(msg, kvs...)
+}
+
 // --- Variable-based wrappers ---
 
 // logViaAlias is a variable holding a direct reference to klog.InfoS.
@@ -157,4 +174,20 @@ func callSites() {
 
 	// Function variable wrapper, correct args (should NOT flag)
 	logViaFuncVar("msg", "key", "value")
+
+	// Slice wrapper, inline literal with odd elements (should flag)
+	logSlice("msg", []interface{}{"key"}) // want `Additional arguments to logSlice should always be Key Value pairs. Please check if there is any key or value missing.`
+
+	// Slice wrapper, inline literal with correct pairs (should NOT flag)
+	logSlice("msg", []interface{}{"key", "value"})
+
+	// Slice wrapper, inline literal with bad key type (should flag)
+	logSlice("msg", []interface{}{1, "value"}) // want `Key positional arguments are expected to be inlined constant strings. Please replace 1 provided with string value`
+
+	// Slice wrapper, leading slice param, inline literal odd (should flag)
+	logSliceFirst([]interface{}{"key"}, "msg") // want `Additional arguments to logSliceFirst should always be Key Value pairs. Please check if there is any key or value missing.`
+
+	// Slice wrapper called with a prebuilt variable: opaque, should NOT flag
+	pairs := []interface{}{"key"}
+	logSlice("msg", pairs)
 }
